@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
 from . import solar
-from .config import N_HARMONICS, PERCENTILE, POOL_HALF_WIDTH_DAYS
+from .config import N_HARMONICS, PERCENTILE, POOL_HALF_WIDTH_DAYS, SITE_TZ
 
 DAYS_PER_YEAR = 365.25
 
@@ -187,3 +188,86 @@ def fit(
         n_years_start=n_years_start,
         n_years_end=n_years_end,
     )
+
+
+def thresholds_table(model: Envelope) -> pd.DataFrame:
+    """The model itself, one row per day of a leap reference year."""
+    return pd.DataFrame(
+        {
+            "doy": np.arange(1, 367),
+            "theta_start_deg": model.theta_start(model.grid_phi),
+            "theta_end_deg": model.theta_end(model.grid_phi),
+            "theta_start_raw_deg": model.raw_start,
+            "theta_end_raw_deg": model.raw_end,
+            "n_samples_start": model.n_start,
+            "n_samples_end": model.n_end,
+            "n_years": np.minimum(model.n_years_start, model.n_years_end),
+        }
+    )
+
+
+def _local_iso(ts: pd.Timestamp) -> str | None:
+    """ISO-8601 in site-local time with an explicit UTC offset."""
+    if pd.isna(ts):
+        return None
+    return ts.tz_convert(SITE_TZ).isoformat()
+
+
+def build_windows(
+    model: Envelope,
+    start_date: dt.date,
+    end_date: dt.date,
+    observed_dates: set[dt.date],
+) -> pd.DataFrame:
+    """Apply the fitted model to every date in the range."""
+    dates = [d.date() for d in pd.date_range(start_date, end_date, freq="D")]
+    rise_set = solar.sun_rise_set(dates)
+
+    rows = []
+    for d in dates:
+        phi = year_angle(
+            pd.DatetimeIndex([pd.Timestamp(d, tz="UTC") + pd.Timedelta(hours=12)])
+        )[0]
+        theta_start = float(model.theta_start(phi)[0])
+        theta_end = float(model.theta_end(phi)[0])
+        start, end = solar.crossings(d, theta_start, theta_end)
+        n_start, n_end = model.samples_near(phi)
+        years_start, years_end = model.years_near(phi)
+
+        # A 25-hour local day is a fall-back day, so an hour is missing.
+        grid_len = len(solar.day_grid_utc(d))
+
+        rows.append(
+            {
+                "date": d,
+                "solar_start_utc": start,
+                "solar_end_utc": end,
+                "solar_start_local": _local_iso(start),
+                "solar_end_local": _local_iso(end),
+                "sunrise_utc": rise_set.loc[d, "sunrise_utc"],
+                "sunset_utc": rise_set.loc[d, "sunset_utc"],
+                "theta_start_deg": theta_start,
+                "theta_end_deg": theta_end,
+                "n_samples": min(n_start, n_end),
+                "n_years": min(years_start, years_end),
+                "dst_hour_missing": grid_len == 1500,
+                "extrapolated": d not in observed_dates,
+                # Spec section 8: not expected at this latitude, but flagged
+                # rather than assumed away.
+                "window_undefined": pd.isna(start) or pd.isna(end),
+            }
+        )
+
+    w = pd.DataFrame(rows)
+    w["start_offset_min"] = (
+        w["solar_start_utc"] - w["sunrise_utc"]
+    ).dt.total_seconds() / 60
+    w["end_offset_min"] = (
+        w["solar_end_utc"] - w["sunset_utc"]
+    ).dt.total_seconds() / 60
+    w["night_start_utc"] = w["solar_end_utc"]
+    w["night_end_utc"] = w["solar_start_utc"].shift(-1)
+    w["night_duration_h"] = (
+        w["night_end_utc"] - w["night_start_utc"]
+    ).dt.total_seconds() / 3600
+    return w
