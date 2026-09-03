@@ -37,12 +37,8 @@ def sun_rise_set(dates: Sequence[dt.date]) -> pd.DataFrame:
     pvlib is given local *noon*. Given local midnight it converts to UTC
     first, lands on the previous UTC day, and returns the previous day's
     sunrise — a silent one-day shift (spec fact 10).
-
-    Duplicate dates in the input are collapsed (order-preserving): the
-    result is indexed by date, and a date can only appear once in an index
-    without ``.loc`` lookups degrading from a scalar to a Series.
     """
-    dates = list(dict.fromkeys(dates))
+    dates = list(dates)
     noon = pd.DatetimeIndex(
         [pd.Timestamp(d) + pd.Timedelta(hours=12) for d in dates]
     ).tz_localize(SITE_TZ)

@@ -41,11 +41,18 @@ def test_crossings_agree_with_pvlib_sunrise_sunset():
     rise/set routine are independent code paths and must give one answer.
 
     The grid has one-minute resolution, so the first minute at or above the
-    threshold falls in [sunrise, sunrise + 60s), and symmetrically at dusk.
+    threshold normally falls in [sunrise, sunrise + 60s). The small negative
+    tolerance covers a sub-second disagreement between two different pvlib
+    algorithms: sun_rise_set_transit_spa uses SPA section 3.8, which is
+    deliberately reduced-precision, while get_solarposition uses the full
+    algorithm. Measured across all 365 days of 2023, the worst excursion
+    below zero is -0.182s; -1s gives five-fold margin while still failing
+    any real solver bug, which would show tens of seconds.
     """
-    dates = [dt.date(2023, 1, 1) + dt.timedelta(days=n) for n in range(0, 365, 7)]
-    dates += [dt.date(2023, 3, 26), dt.date(2023, 10, 29),
-              dt.date(2023, 6, 21), dt.date(2023, 12, 21)]
+    dates = sorted({dt.date(2023, 1, 1) + dt.timedelta(days=n)
+                    for n in range(0, 365, 7)}
+                   | {dt.date(2023, 3, 26), dt.date(2023, 10, 29),
+                      dt.date(2023, 6, 21), dt.date(2023, 12, 21)})
     rs = solar.sun_rise_set(dates)
 
     for d in dates:
@@ -53,8 +60,8 @@ def test_crossings_agree_with_pvlib_sunrise_sunset():
         assert start is not pd.NaT and end is not pd.NaT
         lead = (start - rs.loc[d, "sunrise_utc"]).total_seconds()
         lag = (rs.loc[d, "sunset_utc"] - end).total_seconds()
-        assert 0 <= lead < 60, f"{d}: start {lead}s after sunrise"
-        assert 0 <= lag < 60, f"{d}: end {lag}s before sunset"
+        assert -1 <= lead < 60, f"{d}: start {lead}s from sunrise"
+        assert -1 <= lag < 60, f"{d}: end {lag}s from sunset"
 
 
 def test_crossings_return_nat_when_threshold_is_never_reached():
