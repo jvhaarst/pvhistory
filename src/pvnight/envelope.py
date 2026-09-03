@@ -234,7 +234,9 @@ def build_windows(
         n_start, n_end = model.samples_near(phi)
         years_start, years_end = model.years_near(phi)
 
-        # A 25-hour local day is a fall-back day, so an hour is missing.
+        # A 25-hour local day is a fall-back day: the local clock repeats
+        # an hour, and PVOutput stored only 288 slots for it, so one hour
+        # of data is absent.
         grid_len = len(solar.day_grid_utc(d))
 
         rows.append(

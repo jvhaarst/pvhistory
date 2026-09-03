@@ -152,3 +152,45 @@ def test_start_offset_stays_in_a_physically_sane_band(pipeline):
     """Spec section 9 test 7: within -30 to +60 minutes of sunrise."""
     _, _, w = pipeline
     assert w["start_offset_min"].between(-30, 60).all()
+
+
+def test_end_offset_uses_sunset_not_sunrise(pipeline):
+    """Guards a copy-paste slip in the structurally near-identical offset
+    columns. Measured range is -6.712 .. +0.890 min; computing this against
+    sunrise instead of sunset would put it hours away."""
+    _, _, w = pipeline
+    assert w["end_offset_min"].between(-30, 60).all()
+    assert w["end_offset_min"].notna().all()
+
+
+def test_window_opens_before_sunrise_and_closes_near_sunset(pipeline):
+    """The panels wake on diffuse light slightly before geometric sunrise,
+    so the window always opens early; it closes within a minute of sunset."""
+    _, _, w = pipeline
+    assert (w["solar_start_utc"] <= w["sunrise_utc"]).all()
+    assert (w["solar_end_utc"] <= w["sunset_utc"] + pd.Timedelta(minutes=1)).all()
+
+
+def test_evening_threshold_sits_above_the_morning_threshold(pipeline):
+    """Spec fact 8 as a hard invariant: measured theta_start -1.628..-1.036,
+    theta_end -0.965..-0.148, so the evening threshold is higher on every
+    day of the table. A sign error or a swapped pair would break this."""
+    _, _, w = pipeline
+    assert w["theta_start_deg"].notna().all()
+    assert w["theta_end_deg"].notna().all()
+    assert w["theta_start_deg"].abs().max() < 3.0
+    assert w["theta_end_deg"].abs().max() < 3.0
+    assert (w["theta_end_deg"] > w["theta_start_deg"]).all()
+
+
+def test_both_local_columns_carry_an_explicit_offset(pipeline):
+    """solar_start_local was already covered; solar_end_local was not."""
+    _, _, w = pipeline
+    assert w["solar_end_local"].str.contains(r"\+0[12]:00").all()
+
+
+def test_every_date_draws_on_a_full_pooled_window(pipeline):
+    """Measured 96..120 samples per date. A collapse here would mean the
+    circular pooling window stopped wrapping the year boundary."""
+    _, _, w = pipeline
+    assert (w["n_samples"] >= 90).all()
