@@ -29,7 +29,12 @@ def test_fall_back_day_has_288_slots_and_no_duplicate_instants(loaded):
 
 
 def test_expected_columns_and_dtypes(loaded):
-    assert str(loaded["ts_utc"].dtype) == "datetime64[ns, UTC]"
+    """Tz-aware and UTC is the contract. The datetime resolution is
+    pandas-version-dependent (2.x gives ns, 3.x gives us) and deliberately
+    not asserted."""
+    dtype = loaded["ts_utc"].dtype
+    assert isinstance(dtype, pd.DatetimeTZDtype)
+    assert str(dtype.tz) == "UTC"
     assert loaded["generating"].dtype == bool
     for col in ["power_gen_w", "power_avg_w", "energy_gen_wh",
                 "power_cons_w", "energy_cons_wh"]:

@@ -48,7 +48,7 @@ def load(data_dir: Path) -> pd.DataFrame:
 
     df = pd.DataFrame(
         {
-            "ts_utc": local.dt.tz_convert("UTC").astype("datetime64[ns, UTC]"),
+            "ts_utc": local.dt.tz_convert("UTC"),
             "solar_date": pd.to_datetime(raw["Date"], format="%Y%m%d").dt.date,
             "power_gen_w": raw["Instantaneous Power"].astype("float64").fillna(0.0),
             "power_avg_w": raw["Average Power"].astype("float64").fillna(0.0),
