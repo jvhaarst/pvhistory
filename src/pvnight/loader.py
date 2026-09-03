@@ -52,7 +52,11 @@ def load(data_dir: Path) -> pd.DataFrame:
             "solar_date": pd.to_datetime(raw["Date"], format="%Y%m%d").dt.date,
             "power_gen_w": raw["Instantaneous Power"].astype("float64").fillna(0.0),
             "power_avg_w": raw["Average Power"].astype("float64").fillna(0.0),
-            "energy_gen_wh": raw["Energy Generation"].astype("float64"),
+            "energy_gen_wh": raw["Energy Generation"].astype("float64").fillna(0.0),
+            # Consumption nulls mean "no measurement was recorded", not "no
+            # power was drawn" — do NOT fillna here. Zero-filling would
+            # silently understate night-time consumption, which is exactly
+            # the quantity this project exists to measure.
             "power_cons_w": raw["Power Consumption"].astype("float64"),
             "energy_cons_wh": raw["Energy Consumption"].astype("float64"),
         }

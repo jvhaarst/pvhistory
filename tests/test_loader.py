@@ -41,6 +41,31 @@ def test_expected_columns_and_dtypes(loaded):
         assert loaded[col].dtype == "float64"
 
 
+def test_generation_columns_have_no_nulls(loaded):
+    """Generation nulls are zero: the cumulative counter resets daily, so 0
+    is the true value for a pre-dawn null (spec fact 2)."""
+    for col in ["power_gen_w", "power_avg_w", "energy_gen_wh"]:
+        assert not loaded[col].isna().any()
+
+
+def test_consumption_nulls_are_preserved(loaded):
+    """Deliberately NOT filled. A null here means no measurement was
+    recorded, not that no power was drawn; zero-filling would understate
+    night-time consumption, which is the whole point of the dataset."""
+    assert loaded["power_cons_w"].isna().any()
+    assert loaded["energy_cons_wh"].isna().any()
+
+
+def test_energy_rise_detects_first_light_when_power_still_reads_zero(loaded):
+    """Regression: on 2025-05-13 the counter reaches 1 Wh at 03:50 UTC while
+    both power columns still read 0.0. The energy limb must catch it."""
+    import datetime as dt
+
+    day = loaded[loaded["solar_date"] == dt.date(2025, 5, 13)]
+    first = day.loc[day["generating"], "ts_utc"].min()
+    assert first == pd.Timestamp("2025-05-13T03:50:00", tz="UTC")
+
+
 def _frame(rows):
     """rows: list of (solar_date, power_gen_w, power_avg_w, energy_gen_wh)."""
     return pd.DataFrame(
