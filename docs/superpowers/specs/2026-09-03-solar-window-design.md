@@ -70,17 +70,56 @@ below.
    typical 11 Wh). Consequently **it is impossible to determine from the data
    which copy of the repeated 02:00–02:59 hour survived.** §5 handles this by
    making the question cosmetic rather than load-bearing.
-7. **The horizon is effectively unobstructed.** Sun apparent elevation at
-   first generation, 5th percentile by azimuth bin, is −1.2° to −1.5° across
-   morning azimuths 50°–120° and about −0.2° to +0.2° across evening azimuths
-   240°–310°. Geometric sunrise is −0.833°, so the panels wake on diffuse
+7. **The horizon is effectively unobstructed.** Across morning azimuths
+   50°–120° the 5th-percentile geometric elevation at first light sits around
+   −1.2° to −1.5°, with no azimuth showing a distinct obstruction signature.
+   Geometric sunrise is −0.8358° (fact 10), so the panels wake on diffuse
    skylight alone. No tree or roof shading is detectable.
-8. **The start threshold rises in winter.** In the deep-winter sunrise and
-   sunset azimuth bins (130°–140° morning, 220°–230° evening) the same
-   percentile is about +0.8° to +0.9°. This is the inverter's start-up
-   irradiance threshold biting when the sun climbs at a shallow angle — not
-   shading. **A fixed clock offset from sunrise would therefore be wrong in
-   winter**, which is the central reason for the model in §4.
+
+   **Azimuth binning is season-confounded and must not be read as a horizon
+   profile.** Morning azimuth 130°–140° is reached both at deep-winter
+   sunrise *and* in summer mid-morning, so that bin mixes first-light events
+   with events an hour after sunrise, inflating its apparent threshold. The
+   azimuth chart (§7.3) is a shading *screen* only, carrying this caveat.
+
+8. **The start threshold rises modestly in winter.** Measured directly by
+   month, in geometric elevation, the 5th-percentile threshold is least
+   negative in December and most negative in spring:
+
+   | | December | spring | seasonal range |
+   |---|---|---|---|
+   | first light | −0.91° | −1.67° (April) | 0.76° |
+   | last light | −0.11° | −1.08° (May) | 0.97° |
+
+   This is consistent with the inverter's start-up irradiance threshold
+   biting when the sun climbs at a shallow angle. The effect is real but
+   about **1°**, which at 6.7–9.0 minutes per degree (fact 9) is 6–9 minutes.
+
+9. **Elevation and clock-offset parameterisations are empirically
+   equivalent here.** The seasonal spread of the 5th-percentile *time offset*
+   from sunrise/sunset is 8.0 minutes (first light) and 9.7 minutes (last
+   light); the seasonal spread of the elevation threshold is 0.77°/0.96°,
+   which converts to 6–9 minutes. Neither parameterisation is constant
+   through the year, and neither explains materially more than the other.
+   The rate d(elevation)/dt at the day's edge ranges from 0.1116°/min in
+   December to 0.1494°/min in April. §4.4 states the honest grounds for
+   choosing elevation anyway.
+
+10. **`sun_rise_set_transit_spa` must be given local noon, not local
+    midnight.** Passing midnight local returns the *previous* day's
+    sunrise and sunset, because the function converts to UTC first and
+    2023-06-21 00:00+02:00 is 2023-06-20 22:00 UTC. Passing local noon
+    returns the correct day. This silently shifts every result by one day
+    and is guarded by a test (§9).
+
+11. **pvlib applies no refraction correction below the horizon.**
+    `apparent_elevation` equals `elevation` for all negative elevations and
+    diverges above, reaching 0.615° across our event set. `apparent_elevation`
+    therefore has a kink in its derivative at 0°. Since 36% of first-light
+    and 17% of last-light events sit below the horizon, the model would be
+    fitting a curve across that kink. **The model therefore uses geometric
+    `elevation` throughout** — smooth, and the convention pvlib's own
+    sunrise/sunset already uses.
 
 ## 3. Definitions
 
@@ -104,18 +143,27 @@ below.
 
 ### 4.1 Rationale
 
-Fact 8 rules out a fixed time offset from sunrise. Fact 7 rules out an
-azimuth-resolved horizon profile as the primary model — there is no horizon
-to resolve, and such a model would conflate obstruction with the inverter
-threshold. What varies meaningfully and smoothly through the year is the
-**sun elevation at which the installation starts and stops producing**. That
-is the quantity modelled.
+Facts 7 and 8 together say the boundary is set not by obstruction but by the
+**sun elevation at which the installation starts and stops producing**, and
+that this elevation drifts by about 1° through the year. That drift is the
+quantity modelled.
+
+Fact 7 rules out an azimuth-resolved horizon profile as the primary model:
+there is no horizon to resolve, and the azimuth bins are season-confounded.
+
+Fact 9 is equally important for what it *denies*. A clock-offset model is
+empirically just as good, so this design does **not** rest on the elevation
+model being more accurate — it is not. It rests on elevation being the
+coordinate the inverter threshold physically lives in, and on delegating the
+threshold-to-clock-time conversion to pvlib per date (§4.4). Anyone revisiting
+this choice should know it was close, not obvious.
 
 ### 4.2 Fitting
 
 1. For every solar day with generation, take the first-light and last-light
-   instants and compute the sun's **apparent elevation** at each
-   (`pvlib.solarposition.get_solarposition`, which accounts for refraction).
+   instants and compute the sun's **geometric elevation** at each
+   (`pvlib.solarposition.get_solarposition`, column `elevation`). Geometric,
+   not apparent — see fact 11.
 2. Assign each event a **year angle** φ = 2π · (t − start of its year) /
    (duration of its year). Using a fractional angle rather than an integer
    day-of-year handles leap years exactly and needs no special-casing of
@@ -144,7 +192,7 @@ This yields two smooth curves, θ_start(φ) and θ_end(φ).
 
 ### 4.3 Applying
 
-For a given date and threshold θ, evaluate apparent elevation on a
+For a given date and threshold θ, evaluate geometric elevation on a
 **one-minute grid built in UTC** spanning that local day's true extent (1380,
 1440 or 1500 minutes as the case may be). `solar_start` is the first upward
 crossing of θ; `solar_end` is the last downward crossing. One-minute
@@ -159,12 +207,19 @@ No hand-rolled astronomy: pvlib performs all solar-position calculation.
 ### 4.4 Rejected alternatives
 
 - **Azimuth-resolved horizon profile.** Physically the correct model for a
-  shaded site. Rejected: fact 7 shows no shading here, and it conflates
-  horizon with inverter threshold, producing the misleading winter bins of
-  fact 8. Retained only as a one-off diagnostic chart (§7).
-- **Clock-offset percentile from sunrise/sunset.** Simplest to explain and
-  rejected by fact 8: equal minute-offsets correspond to wildly unequal
-  elevations in June and December.
+  shaded site. Rejected: fact 7 shows no shading here, and azimuth bins are
+  season-confounded, so the model would fit an artefact. Retained only as a
+  one-off diagnostic screen (§7.3), clearly labelled as such.
+- **Clock-offset percentile from sunrise/sunset.** Per fact 9 this is
+  **empirically equivalent** to the chosen model — 8.0/9.7 minutes of
+  seasonal spread against the elevation model's 6–9 minutes. It is not
+  rejected on accuracy, and any claim that it is would be false.
+  Elevation is preferred on two narrower grounds: it is the coordinate in
+  which the inverter's start-up threshold physically lives, so the fitted
+  curve is interpretable rather than merely descriptive; and converting a
+  threshold to a clock time is delegated to pvlib per date, which disposes of
+  leap years and DST without date arithmetic of our own. A clock-offset model
+  would need its own sunrise lookup regardless, so it saves nothing.
 - **Purely astronomical sunrise/sunset.** Ignores the inverter start-up
   threshold, so it would classify genuinely dark minutes as day.
 - **Per-date union of all observed windows.** One anomalous sample would
@@ -234,7 +289,7 @@ exist).
 | Column | Description |
 |---|---|
 | `doy` | 1–366 |
-| `theta_start_deg` | fitted θ_start, apparent elevation |
+| `theta_start_deg` | fitted θ_start, geometric elevation |
 | `theta_end_deg` | fitted θ_end |
 | `theta_start_raw_deg`, `theta_end_raw_deg` | pre-smoothing 5th percentiles |
 | `n_samples` | pooled events in the ±10-day window |
@@ -269,7 +324,8 @@ Published as a **private Artifact**, link handed to the user. Five charts:
 2. Apparent elevation at first and last light versus day of year, with the
    raw percentiles and the fitted curve — this is the chart that shows the
    winter threshold rise of fact 8.
-3. Azimuth-binned horizon diagnostic, confirming fact 7.
+3. Azimuth-binned horizon diagnostic (fact 7). **Must be captioned as a
+   shading screen, not a horizon profile**, since the bins mix seasons.
 4. Night length across the year.
 5. Data-coverage heatmap by year, making 2020's partial coverage and the five
    generation-free days visible.
@@ -297,7 +353,7 @@ theme-aware tokens.
 Test-driven throughout. The load-bearing tests:
 
 1. **Cross-validated astronomy.** The elevation-crossing solver at
-   θ = −0.833° must agree with pvlib's independent
+   θ = −0.8358° must agree with pvlib's independent
    `sun_rise_set_transit_spa` to within one minute, across a full year. Two
    different code paths, one answer.
 2. **UTC index invariant.** After loading all six years the UTC index is
