@@ -13,6 +13,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
@@ -36,6 +37,20 @@ FURNITURE = "#898781"
 #       --mode light --surface "#fcfcfb" --pairs all   -> ALL CHECKS PASS
 SERIES = ["#3987e5", "#d95926", "#199e70"]
 
+# Sequential single-hue ramp (blue, light -> dark), dataviz skill's
+# palette.md "Sequential hue" table, steps 100 through 700 in order. Used
+# for the coverage heatmap instead of a stock multi-hue colormap: the skill
+# lists rainbow/multi-hue sequential ramps as an anti-pattern, and this is
+# the documented ramp for exactly this case (magnitude on a heatmap).
+_SEQUENTIAL_BLUE_STOPS = [
+    "#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7",
+    "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281",
+    "#0d366b",
+]
+COVERAGE_CMAP = LinearSegmentedColormap.from_list(
+    "coverage", _SEQUENTIAL_BLUE_STOPS
+)
+
 
 def _svg(fig) -> str:
     """Render a figure to an inline SVG string with a transparent ground."""
@@ -57,6 +72,8 @@ def _svg(fig) -> str:
 
 def _reference_year(windows: pd.DataFrame) -> int:
     """The most completely represented year in the window table."""
+    if windows.empty:
+        raise ValueError("_reference_year: windows frame is empty")
     return int(pd.to_datetime(windows["date"]).dt.year.value_counts().idxmax())
 
 
@@ -172,6 +189,8 @@ def chart_night_length(windows: pd.DataFrame) -> str:
 
 def chart_coverage(loaded: pd.DataFrame) -> str:
     """Generating samples per day, by year — shows 2020's partial start."""
+    if loaded.empty:
+        raise ValueError("chart_coverage: loaded frame is empty")
     daily = loaded.groupby("solar_date")["generating"].sum()
     idx = pd.DatetimeIndex(pd.to_datetime(pd.Series(list(daily.index))))
     frame = pd.DataFrame(
@@ -183,7 +202,7 @@ def chart_coverage(loaded: pd.DataFrame) -> str:
 
     fig, ax = plt.subplots(figsize=(9, 2.8))
     ax.imshow(
-        grid.to_numpy(), aspect="auto", origin="lower", cmap="viridis",
+        grid.to_numpy(), aspect="auto", origin="lower", cmap=COVERAGE_CMAP,
         interpolation="nearest",
         extent=[1, 366, grid.index.min() - 0.5, grid.index.max() + 0.5],
     )
@@ -203,9 +222,12 @@ def chart_coverage(loaded: pd.DataFrame) -> str:
 # categorical slot 1 so the "fitted window" line in the charts and the accent
 # in the prose read as the same idea. Headings set in a serif built for
 # reading numbers in tables (Source Serif 4) nod to the printed ephemeris
-# this page is a digital descendant of; body copy in Public Sans; the stat
-# tiles and coordinates in IBM Plex Mono with tabular figures, since those
-# are measurements, not prose.
+# this page is a digital descendant of; body copy in Public Sans. The site
+# coordinates line is set in IBM Plex Mono, since it is a run of distinct
+# measurements rather than prose; the stat-tile values are large standalone
+# numbers, so per the dataviz skill they stay in the page's primary sans
+# with proportional (not tabular) figures — tabular-nums is reserved for
+# numbers that actually stack in a column, which none here do.
 # ---------------------------------------------------------------------------
 
 STYLE = """
@@ -265,8 +287,9 @@ h1 {
 }
 .stat { background: var(--surface); padding: 16px 18px; }
 .stat b {
-  display: block; font: 500 21px/1.2 "IBM Plex Mono", ui-monospace, monospace;
-  font-variant-numeric: tabular-nums; margin: 0 0 4px;
+  display: block;
+  font: 600 22px/1.2 "Public Sans", ui-sans-serif, system-ui, sans-serif;
+  margin: 0 0 4px;
 }
 .stat span { color: var(--muted); font-size: 12px; }
 
