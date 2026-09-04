@@ -62,7 +62,7 @@ def load_meter(meter_dir: Path) -> pd.DataFrame:
 def find_gaps(frame: pd.DataFrame) -> pd.DataFrame:
     """Every run of missing intervals, reported rather than interpolated.
 
-    Five of the seven gaps fall in January 2024 and together remove most of
+    Four of the seven gaps fall in January 2024 and together remove most of
     8-19 January — midwinter, when night consumption peaks. A night touching
     one of these must be excluded, not counted as a quiet night.
     """

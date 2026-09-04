@@ -74,3 +74,8 @@ def test_find_gaps_on_a_clean_frame_returns_nothing():
         "import_kwh": 0.1, "export_kwh": 0.0,
     })
     assert len(find_gaps(clean)) == 0
+
+
+def test_load_meter_rejects_a_directory_with_no_workbooks(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        load_meter(tmp_path)
