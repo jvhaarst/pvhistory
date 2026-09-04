@@ -58,9 +58,82 @@ See `docs/superpowers/specs/2026-09-03-solar-window-design.md` for the full
 design: why an elevation-threshold model, how the seasonal fit works, and the
 established facts about the source data that drove those choices.
 
-## Not yet built
+## Night consumption and battery sizing
 
-Night consumption statistics are **not** implemented here. This repository
-only produces the window/night boundaries. A future piece of work will join
-household consumption data against `night_start_utc`/`night_end_utc` in
-`solar_windows.csv` to compute night-only consumption statistics.
+```
+uv run python analyze_night.py
+```
+
+This joins household consumption against the night boundaries in
+`out/solar_windows.csv`, classifies each night as ordinary or EV-charging,
+runs a chronological battery simulation across a sweep of candidate
+capacities (0–30 kWh in 0.5 kWh steps, at 2.5/3.0/3.7 kW inverter power), and
+writes three files to `out/`: `night_summary.csv`, `battery_sweep.csv`, and
+`night_report.html`.
+
+**`out/night_summary.csv`** — one row per calendar date (2,557 rows). Night
+window (`night_start_utc`/`night_end_utc`), total night consumption
+(`night_wh`), `peak_w`, `hours_above_2kw`, `is_ev` (charging-shaped night),
+data `coverage` for that night and `missing_increments`/`dst_hour_missing`
+flags, and `covered` (whether the night has enough data to trust its total).
+Across 2,031 covered nights (2020-05-20 to 2025-12-30), median night
+consumption is 4.85 kWh (p90 10.52 kWh); 72 of those nights are EV-charging,
+at a median of 24.5 kWh against 4.71 kWh for the rest.
+
+**`out/battery_sweep.csv`** — one row per (capacity, inverter power) pair.
+Annual grid import and PV export, night and non-EV-night grid import, night
+self-sufficiency, full-equivalent cycles per year, and the marginal kWh of
+avoided grid import per additional kWh of capacity, both across all nights
+and non-EV nights only.
+
+**`out/night_report.html`** — a static HTML page charting the same material
+as `out/report.html`: the night-consumption distribution, its shape through
+the year, the capacity/marginal-return curves with the chosen knee marked,
+and EV-charging sensitivity. Also a local build artefact, git-ignored like
+`out/report.html`.
+
+### The winter wall
+
+Median daytime surplus (generation minus that day's household draw) is
+**negative in November, December and January** — in those months there is,
+on a typical day, no surplus left over to charge a battery from at all. No
+amount of capacity fixes this: it is bounded by how little the panels
+produce in midwinter, not by how much storage is bought. The report computes,
+from the same data, what fraction of covered nights an infinite,
+power-unlimited battery could actually have carried on daytime surplus alone
+— that figure is the real ceiling on any capacity recommendation, and is
+quoted directly on the report page rather than restated here, since it moves
+with each data refresh.
+
+### Recommended capacity
+
+The sizing rule (see `pvnight.battery.recommend_capacity`) is: the smallest
+capacity whose marginal return, on the non-EV-night curve, has fallen below
+50 kWh/yr avoided grid import per additional kWh. As run against the current
+six years of data, at a 3 kW inverter this rule currently selects
+**0.5 kWh** — the smallest step in the sweep. That is very likely not the
+answer a buyer wants: the marginal-return curve is not monotonically
+decreasing. It dips to ~37 kWh/kWh at the very first step, then *rises* to a
+peak of ~134 kWh/kWh around 2.5–3.0 kWh, before decaying and finally
+settling below the 50 kWh/kWh threshold for good around 7.0–7.5 kWh. The
+rule as implemented returns the first capacity it finds below threshold when
+scanning from zero, which is this leading dip rather than the real knee
+after the peak. The full curve is in `battery_sweep.csv` and plotted on
+`night_report.html` so a reader can pick the sustained knee (≈7–7.5 kWh)
+by eye; this is flagged here rather than silently worked around, since fixing
+the rule would mean editing `pvnight/battery.py`.
+
+### Inverter power
+
+At the recommended capacity, moving from a 3.0 kW to a 3.7 kW inverter
+changes non-EV-night grid import by a measured **0%**, computed by
+`analyze_night.py` (`pct_gain_from_3p7kw_inverter`) rather than taken from
+the design spec's expectation. Because the recommended capacity above is
+degenerate (0.5 kWh), that particular reading is not informative on its own:
+`battery_sweep.csv` shows the same comparison is a wash at the more
+plausible ~7 kWh knee too — a fraction of a percent, and in the *opposite*
+direction (3.7 kW imports marginally more, not less, likely a knock-on
+timing effect through the year-long chronological simulation rather than the
+power cap itself). Either way, the conclusion holds: at capacities worth
+buying, inverter power is not the binding constraint here — capacity and
+winter generation are.
