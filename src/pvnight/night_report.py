@@ -262,11 +262,17 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
          "how large the battery is.",
          chart_knee(sweep_df, recommended_kwh)),
         ("Where the marginal kWh stops paying",
-         f"Each additional kWh of capacity avoids less than the last. The "
-         f"recommendation of {recommended_kwh:.1f} kWh is the first capacity "
-         "whose marginal return falls below 50 kWh/yr per added kWh — an "
-         "extra kWh cycling less than once a week. <strong>That 50 is a "
-         "stated judgement, not a derived constant</strong>: read your own "
+         "This curve rises before it falls: a battery this small is "
+         "exhausted within minutes of sunset, so its first half-kWh barely "
+         "helps, and marginal return climbs before it ever starts "
+         "declining. That is why the rule can't just take the earliest "
+         "point under the line — that would land on this leading dip, not "
+         "the real knee. "
+         f"So the recommendation of {recommended_kwh:.1f} kWh is the "
+         "smallest capacity beyond which the marginal return never rises "
+         "above 50 kWh/yr per added kWh again — an extra kWh cycling less "
+         "than once a week from there on. <strong>That 50 is a stated "
+         "judgement, not a derived constant</strong>: read your own "
          "cut-off straight off this curve if you prefer a different one.",
          chart_marginal(sweep_df, recommended_kwh)),
         ("When the battery actually works",

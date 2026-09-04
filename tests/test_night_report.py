@@ -111,3 +111,13 @@ def test_monthly_charts_do_not_trust_row_order(toy):
     html = build_html(nights, sweep, shuffled, sens, recommended_kwh=7.0,
                        coverable_pct=48.2, negative_surplus_months=[11, 12, 1])
     assert html.count("<svg") == 8
+
+
+def test_marginal_caption_describes_the_last_crossing_not_the_first(toy):
+    """The curve rises before it falls, so "first capacity below the
+    threshold" is both wrong and degenerate. The page must not say it."""
+    html = build_html(*toy, recommended_kwh=7.5, coverable_pct=48.2,
+                      negative_surplus_months=[11, 12, 1])
+    low = html.lower()
+    assert "first capacity" not in low
+    assert "never" in low and "judgement" in low

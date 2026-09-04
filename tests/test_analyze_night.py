@@ -35,6 +35,10 @@ def test_power_cap_sensitivity_is_measured_not_assumed(tmp_path, data_dir):
     s = run(data_dir, tmp_path)
     gain = s["pct_gain_from_3p7kw_inverter"]
     assert gain == gain          # not NaN
+    # Measured value is ~-0.20%: a 3.7 kW inverter charges harder early in a
+    # surplus period and can leave less headroom later, a real dispatch
+    # effect, not an error — so the bound admits a small negative rather
+    # than clamping to zero.
     assert -10.0 <= gain < 100.0
 
 
