@@ -22,11 +22,20 @@ def test_power_cap_sensitivity_is_measured_not_assumed(tmp_path, data_dir):
     """Spec fact 9 says the 3 kW charge cap is *expected* not to bind, and
     that the simulation must confirm it rather than the spec asserting it.
     This pins that the figure is actually computed and is a sane percentage;
-    the report states the value, whatever it turns out to be."""
+    the report states the value, whatever it turns out to be.
+
+    A small negative is a real possible outcome, not a bug: at the corrected
+    (7.5 kWh) recommended capacity the measured figure is about -0.2%, since
+    a wider inverter charging harder early can leave less headroom later —
+    a genuine dispatch knock-on through the year-long chronological
+    simulation. Only a large negative (the cap meaningfully hurting import)
+    or a value at/above 100% would be a sign of a real defect, so the bound
+    is widened rather than clamped to zero, per the ruling that discovered
+    this effect."""
     s = run(data_dir, tmp_path)
     gain = s["pct_gain_from_3p7kw_inverter"]
     assert gain == gain          # not NaN
-    assert 0.0 <= gain < 100.0
+    assert -10.0 <= gain < 100.0
 
 
 def test_summary_csv_carries_the_ev_flag_and_coverage(tmp_path, data_dir):

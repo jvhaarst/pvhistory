@@ -212,10 +212,19 @@ self-sufficiency (%), and full-equivalent cycles per year.
 
 The knee is located on **marginal grid import avoided per additional kWh of
 capacity**. "Where the curve flattens" is not implementable as written, so the
-rule is explicit: the recommended capacity is the **smallest capacity whose
-marginal return has fallen below 50 kWh/yr per additional kWh**. An extra kWh
-of battery earning less than 50 kWh/yr is cycling under about once a week, at
-which point it is hard to justify buying.
+rule is explicit: the recommended capacity is the **smallest capacity beyond
+which the marginal return never rises above 50 kWh/yr per additional kWh
+again**. An extra kWh of battery earning less than 50 kWh/yr is cycling under
+about once a week, at which point it is hard to justify buying.
+
+**The curve is not monotonic, which is why the rule says "never again" rather
+than "first below".** Measured on the real non-EV curve at 3 kW: marginal
+return is only 36.8 kWh/yr per kWh at 0.5 kWh, climbs to a peak of 134.0 at
+2.5 kWh, and falls back through the threshold between 7.0 (50.6) and 7.5
+(41.3). A very small battery is exhausted within minutes of sunset, so its
+first half-kWh buys almost nothing; adding capacity lets it carry more of the
+evening load before saturating. A "first capacity below the threshold" rule
+fires on the leading edge of that climb and returns a degenerate 0.5 kWh.
 
 The 50 kWh/yr figure is a stated judgement, not a derived constant. The report
 therefore prints the full marginal-return table beside the curve and marks the

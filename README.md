@@ -107,33 +107,34 @@ with each data refresh.
 
 ### Recommended capacity
 
-The sizing rule (see `pvnight.battery.recommend_capacity`) is: the smallest
-capacity whose marginal return, on the non-EV-night curve, has fallen below
-50 kWh/yr avoided grid import per additional kWh. As run against the current
-six years of data, at a 3 kW inverter this rule currently selects
-**0.5 kWh** — the smallest step in the sweep. That is very likely not the
-answer a buyer wants: the marginal-return curve is not monotonically
-decreasing. It dips to ~37 kWh/kWh at the very first step, then *rises* to a
-peak of ~134 kWh/kWh around 2.5–3.0 kWh, before decaying and finally
-settling below the 50 kWh/kWh threshold for good around 7.0–7.5 kWh. The
-rule as implemented returns the first capacity it finds below threshold when
-scanning from zero, which is this leading dip rather than the real knee
-after the peak. The full curve is in `battery_sweep.csv` and plotted on
-`night_report.html` so a reader can pick the sustained knee (≈7–7.5 kWh)
-by eye; this is flagged here rather than silently worked around, since fixing
-the rule would mean editing `pvnight/battery.py`.
+The marginal-return curve (kWh/yr of avoided grid import per additional kWh
+of capacity, on the non-EV-night curve) is **not monotonically decreasing**:
+a very small battery is exhausted within minutes of sunset, so its first
+half-kWh buys almost nothing; adding capacity lets it carry more of the
+evening load before saturating, so marginal value climbs to a peak (~134
+kWh/kWh around 2.5–3.0 kWh) before declining for good. The sizing rule (see
+`pvnight.battery.recommend_capacity`) accounts for this: it is the smallest
+capacity beyond which the marginal return never rises above the threshold
+(50 kWh/yr avoided per additional kWh) again — not the first capacity that
+happens to dip below it, which would catch the leading edge of that early
+climb and return a degenerate answer.
+
+As run against the current six years of data, at a 3 kW inverter this rule
+selects **7.5 kWh**, giving roughly 38% household night self-sufficiency at
+around 174 full-equivalent cycles per year. The full curve is in
+`battery_sweep.csv` and plotted on `night_report.html`, with the chosen knee
+marked, so a reader who prefers a different 50 kWh/kWh cut-off can read
+their own answer straight off the same chart.
 
 ### Inverter power
 
 At the recommended capacity, moving from a 3.0 kW to a 3.7 kW inverter
-changes non-EV-night grid import by a measured **0%**, computed by
+changes non-EV-night grid import by a measured **-0.2%** — computed by
 `analyze_night.py` (`pct_gain_from_3p7kw_inverter`) rather than taken from
-the design spec's expectation. Because the recommended capacity above is
-degenerate (0.5 kWh), that particular reading is not informative on its own:
-`battery_sweep.csv` shows the same comparison is a wash at the more
-plausible ~7 kWh knee too — a fraction of a percent, and in the *opposite*
-direction (3.7 kW imports marginally more, not less, likely a knock-on
-timing effect through the year-long chronological simulation rather than the
-power cap itself). Either way, the conclusion holds: at capacities worth
-buying, inverter power is not the binding constraint here — capacity and
-winter generation are.
+the design spec's expectation, and reported as measured rather than clamped
+to zero. The negative sign means the 3.7 kW inverter imports marginally
+*more* over the year, not less: charging harder early in a surplus period
+leaves less headroom later, a real (if small) dispatch knock-on through the
+year-long chronological simulation, not the power cap itself binding. Either
+way the conclusion holds: at a capacity worth buying, inverter power is not
+the binding constraint here — capacity and winter generation are.

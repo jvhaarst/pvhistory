@@ -120,15 +120,28 @@ def test_marginal_return_is_the_gradient_of_avoided_import():
     assert m[1] == pytest.approx(g[0] - g[1], rel=1e-6)
 
 
-def test_recommend_returns_the_first_capacity_below_the_threshold():
+def test_recommend_returns_the_capacity_beyond_which_return_never_recovers():
     df = pd.DataFrame({
         "capacity_kwh": [0.0, 1.0, 2.0, 3.0, 4.0],
         "power_kw": 3.0,
         "marginal_kwh_per_kwh": [np.nan, 900.0, 800.0, 700.0, 600.0],
         "nonev_marginal_kwh_per_kwh": [np.nan, 200.0, 120.0, 40.0, 10.0],
     })
-    # default scenario is "nonev", so the nonev column decides
     assert recommend_capacity(df, power_kw=3.0, threshold_kwh_per_kwh=50.0) == 3.0
-    # and "all" reads the other column, which never drops below the threshold
     assert recommend_capacity(df, power_kw=3.0, threshold_kwh_per_kwh=50.0,
                               scenario="all") == 4.0
+
+
+def test_recommend_ignores_a_low_marginal_return_at_tiny_capacity():
+    """The real curve rises before it falls: a 0.5 kWh battery empties within
+    minutes of sunset, so its first half-kWh buys little, and marginal value
+    peaks near 2.5 kWh. A first-crossing rule returns 0.5 here, which is
+    degenerate. The answer must be 4.0 — the first capacity past the last one
+    still earning its keep."""
+    df = pd.DataFrame({
+        "capacity_kwh": [0.0, 0.5, 1.5, 2.5, 3.5, 4.0, 5.0],
+        "power_kw": 3.0,
+        "marginal_kwh_per_kwh": np.nan,
+        "nonev_marginal_kwh_per_kwh": [np.nan, 36.8, 113.3, 134.0, 60.0, 41.3, 13.6],
+    })
+    assert recommend_capacity(df, power_kw=3.0, threshold_kwh_per_kwh=50.0) == 4.0

@@ -203,17 +203,33 @@ def recommend_capacity(
     threshold_kwh_per_kwh: float = 50.0,
     scenario: str = "nonev",
 ) -> float:
-    """Smallest capacity whose marginal return has fallen below the threshold.
+    """Smallest capacity beyond which the marginal return never recovers.
 
-    "Where the curve flattens" is not implementable, so the rule is explicit:
-    an extra kWh of battery earning less than `threshold_kwh_per_kwh` per year
-    is cycling under about once a week, which is hard to justify buying. The
-    threshold is a stated judgement, not a derived constant — the report prints
-    the whole curve so a reader can choose differently.
+    The marginal-return curve is NOT monotonic. A very small battery is
+    exhausted within minutes of sunset, so its first half-kWh buys little;
+    marginal value climbs to a peak near 2.5 kWh before saturating. A
+    "first capacity below the threshold" rule therefore fires on the
+    leading edge of that climb and returns a degenerate answer.
+
+    So: find the largest capacity still at or above the threshold, and
+    recommend the next step up. An extra kWh earning less than
+    `threshold_kwh_per_kwh` per year is cycling under about once a week,
+    which is hard to justify buying. The threshold is a stated judgement,
+    not a derived constant — the report prints the whole curve so a reader
+    can choose differently.
     """
     col = "marginal_kwh_per_kwh" if scenario == "all" else "nonev_marginal_kwh_per_kwh"
     d = sweep_df[sweep_df["power_kw"] == power_kw].sort_values("capacity_kwh")
-    below = d[d[col].notna() & (d[col] < threshold_kwh_per_kwh)]
-    if below.empty:
-        return float(d["capacity_kwh"].max())
-    return float(below["capacity_kwh"].iloc[0])
+    d = d[d[col].notna()]
+    if d.empty:
+        return float(sweep_df["capacity_kwh"].max())
+
+    at_or_above = d[d[col] >= threshold_kwh_per_kwh]
+    if at_or_above.empty:
+        return float(d["capacity_kwh"].iloc[0])
+
+    last = at_or_above["capacity_kwh"].iloc[-1]
+    beyond = d[d["capacity_kwh"] > last]
+    if beyond.empty:
+        return float(last)
+    return float(beyond["capacity_kwh"].iloc[0])
