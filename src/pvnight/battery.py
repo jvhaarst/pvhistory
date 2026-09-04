@@ -159,7 +159,17 @@ def sweep(
     round_trip: float = 0.90,
     usable_fraction: float = 0.90,
 ) -> pd.DataFrame:
-    """Simulate every capacity against every inverter power, once each."""
+    """Simulate every capacity against every inverter power, once each.
+
+    ``cycles_per_yr`` divides AC-side delivered energy (``discharge_wh``,
+    what actually reached the house) by DC-side usable capacity
+    (``usable_wh``, before the discharge-side efficiency loss). That
+    understates true full-equivalent cycle throughput by the discharge
+    efficiency factor (sqrt(round_trip) ~= 94.9% at the default 90% round
+    trip), i.e. by about 5% — conservative, not misleading in the dangerous
+    direction, but worth knowing when comparing this figure to a spec sheet
+    or to "cycles roughly once a week" reasoning.
+    """
     s = samples.sort_values("ts_utc")
     net = net_wh(s)
     night, nonev, month = build_masks(s, nights_df)

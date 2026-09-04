@@ -71,7 +71,8 @@ capacities (0–30 kWh in 0.5 kWh steps, at 2.5/3.0/3.7 kW inverter power), and
 writes three files to `out/`: `night_summary.csv`, `battery_sweep.csv`, and
 `night_report.html`.
 
-**`out/night_summary.csv`** — one row per calendar date (2,557 rows). Night
+**`out/night_summary.csv`** — one row per calendar date (2,556 data rows;
+the file itself is 2,557 lines counting the header). Night
 window (`night_start_utc`/`night_end_utc`), total night consumption
 (`night_wh`), `peak_w`, `hours_above_2kw`, `is_ev` (charging-shaped night),
 data `coverage` for that night and `missing_increments`/`dst_hour_missing`
@@ -86,7 +87,12 @@ at a median of 24.5 kWh against 4.71 kWh for the rest.
 Annual grid import and PV export, night and non-EV-night grid import, night
 self-sufficiency, full-equivalent cycles per year, and the marginal kWh of
 avoided grid import per additional kWh of capacity, both across all nights
-and non-EV nights only.
+and non-EV nights only. `cycles_per_yr` divides AC-side delivered energy
+(what actually reached the house) by DC-side usable capacity (before the
+discharge-side efficiency loss), so it understates true cycle throughput by
+about 5% at the default 90% round trip — conservative, not misleading in the
+dangerous direction, but worth knowing when comparing this figure against
+other sources.
 
 **`out/night_report.html`** — a static HTML page charting the same material
 as `out/report.html`: the night-consumption distribution, its shape through
@@ -124,9 +130,10 @@ climb and return a degenerate answer.
 As run against the current six years of data, at a 3 kW inverter this rule
 selects **7.5 kWh**, giving roughly 38% household night self-sufficiency at
 around 174 full-equivalent cycles per year. The full curve is in
-`battery_sweep.csv` and plotted on `night_report.html`, with the chosen knee
-marked, so a reader who prefers a different 50 kWh/kWh cut-off can read
-their own answer straight off the same chart.
+`battery_sweep.csv`, plotted on `night_report.html` alongside the all-nights
+curve for context, and printed as a table beside the chart with the chosen
+knee row marked, so a reader who prefers a different 50 kWh/kWh cut-off can
+read their own answer straight off the same page.
 
 ### Inverter power
 
