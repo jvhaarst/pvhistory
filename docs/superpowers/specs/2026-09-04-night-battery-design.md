@@ -62,7 +62,7 @@ the 2,031 nights with better than 95% sample coverage, spanning 2020-05-20 to
    | Mode | Power | Duration | Example |
    |---|---|---|---|
    | Fast | ~8 kW | 3–4 h | 2023-12-28, 44.5 kWh night, peak 9,684 W |
-   | Slow | ~3.5 kW | 12+ h | 2023-11-13, 42.9 kWh night, peak under 3.7 kW |
+   | Slow | ~3.5 kW | 12+ h | 2022-11-13, 42.9 kWh night, peak 3,732 W |
 
    A "≥1 h above 5 kW" rule finds 53 nights and misses every slow-mode night.
 
@@ -73,6 +73,20 @@ the 2,031 nights with better than 95% sample coverage, spanning 2020-05-20 to
 7. **EV charging began in 2022.** Nights with ≥1 h above 5 kW: zero in 2020 and
    2021, then 7 (2022), 20 (2023), 12 (2024), 14 (2025). Yearly maximum night
    consumption steps from ~16.5 kWh (2020–21) to ~43 kWh (2022 onward).
+
+   **This was measured with the ≥1 h above 5 kW rule, not the rule §3 adopts.**
+   The adopted "≥2 h above 2 kW" classifier additionally flags six pre-2022
+   winter evenings — 2020-11-15, 2020-12-13, 2021-03-15, 2021-11-29,
+   2021-12-19, 2021-12-25 — each 14.7 to 16.5 kWh with a 3.5–5.1 kW load for
+   about two hours, and none showing the fast-charge signature. Plausibly a
+   heat pump, oven or dryer; certainly not a car that did not exist yet.
+
+   These six are a **known false-positive rate of 6 in 72**, and they are
+   already included in fact 6's counts, so those figures stand. The rule is
+   deliberately *not* tightened to remove them: six nights out of a 1,959-night
+   household pool cannot move the sizing, and a heuristic whose limits are
+   visible is worth more than one tuned until a claim comes true. The §3
+   sensitivity table exists to expose exactly this.
 
 8. **A 3 kW discharge cap is nearly free on ordinary nights and crippling on EV
    nights.** Share of night energy drawn above 3 kW, which no 3 kW battery can
