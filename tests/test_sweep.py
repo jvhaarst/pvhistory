@@ -2,7 +2,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pvnight.battery import build_masks, net_wh, recommend_capacity, sweep
+from pvnight.battery import (
+    benefit_share_pct,
+    build_masks,
+    elbow_capacity,
+    net_wh,
+    recommend_capacity,
+    sweep,
+)
 
 
 def test_net_treats_missing_consumption_as_a_gap():
@@ -170,3 +177,57 @@ def test_recommend_returns_the_largest_capacity_when_return_never_falls_off():
         "nonev_marginal_kwh_per_kwh": [np.nan, 900.0, 800.0],
     })
     assert recommend_capacity(df, power_kw=3.0, threshold_kwh_per_kwh=50.0) == 2.0
+
+
+def test_benefit_share_runs_from_zero_to_one_hundred():
+    """Share of the benefit an infinitely large battery could deliver.
+    Threshold-free: it needs no judgement call, only the curve's endpoints."""
+    s = pd.DataFrame({
+        "capacity_kwh": [0.0, 1.0, 2.0, 3.0],
+        "power_kw": 3.0,
+        "nonev_night_grid_import_kwh_yr": [100.0, 60.0, 30.0, 20.0],
+    })
+    out = benefit_share_pct(s, power_kw=3.0)
+    assert out.iloc[0] == pytest.approx(0.0)
+    assert out.iloc[-1] == pytest.approx(100.0)
+    # 100 -> 60 is 40 of the 80 total achievable
+    assert out.iloc[1] == pytest.approx(50.0)
+
+
+def test_elbow_finds_the_bend_without_any_threshold():
+    """Maximum perpendicular distance from the chord joining the endpoints.
+    On an L-shaped curve the elbow is the corner."""
+    s = pd.DataFrame({
+        "capacity_kwh": [0.0, 1.0, 2.0, 3.0, 4.0],
+        "power_kw": 3.0,
+        "nonev_night_grid_import_kwh_yr": [100.0, 40.0, 20.0, 14.0, 10.0],
+    })
+    assert elbow_capacity(s, power_kw=3.0) == 1.0
+
+
+def test_elbow_is_flat_curve_safe():
+    """A straight line has no bend; return the largest capacity rather than
+    an arbitrary interior point."""
+    s = pd.DataFrame({
+        "capacity_kwh": [0.0, 1.0, 2.0],
+        "power_kw": 3.0,
+        "nonev_night_grid_import_kwh_yr": [100.0, 50.0, 0.0],
+    })
+    assert elbow_capacity(s, power_kw=3.0) == 2.0
+
+
+def test_elbow_and_benefit_share_on_the_real_sweep(real_sweep):
+    """Measured: the parameter-free elbow lands at 8.0 kWh, half a step above
+    the 50 kWh/yr threshold's 7.5, and 7.5 kWh captures 84.2% of everything an
+    infinite battery could achieve."""
+    assert elbow_capacity(real_sweep, power_kw=3.0) == pytest.approx(8.0)
+    share = benefit_share_pct(real_sweep, power_kw=3.0)
+    d = real_sweep[real_sweep.power_kw == 3.0].sort_values("capacity_kwh").reset_index(drop=True)
+    at_7_5 = float(share[np.isclose(d.capacity_kwh, 7.5)].iloc[0])
+    assert at_7_5 == pytest.approx(84.2, abs=0.5)
+
+
+@pytest.fixture(scope="session")
+def real_sweep():
+    """The committed sweep, so the threshold-free figures are pinned to data."""
+    return pd.read_csv("out/battery_sweep.csv")

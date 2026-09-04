@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+from .battery import benefit_share_pct, elbow_capacity  # noqa: E402
 from .report import COVERAGE_CMAP, FURNITURE, SERIES, STYLE, _svg  # noqa: E402,F401
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -111,7 +112,7 @@ def chart_knee(sweep: pd.DataFrame, recommended_kwh: float) -> str:
 
 
 def chart_marginal(sweep: pd.DataFrame, recommended_kwh: float,
-                    threshold: float = 50.0) -> str:
+                    threshold: float = 50.0, elbow_kwh: float | None = None) -> str:
     """Marginal kWh/yr avoided per added kWh, both scenarios.
 
     The recommendation (``recommend_capacity``) is taken from the non-EV
@@ -128,7 +129,11 @@ def chart_marginal(sweep: pd.DataFrame, recommended_kwh: float,
             alpha=0.6, label="all nights (context)")
     ax.axhline(threshold, color=FURNITURE, ls="--", lw=1,
                label=f"{threshold:.0f} kWh/yr per kWh cut-off")
-    ax.axvline(recommended_kwh, color=FURNITURE, ls=":", lw=1)
+    ax.axvline(recommended_kwh, color=FURNITURE, ls=":", lw=1,
+               label=f"{recommended_kwh:.1f} kWh — threshold rule")
+    if elbow_kwh is not None:
+        ax.axvline(elbow_kwh, color=SERIES[2], ls="-.", lw=1.5,
+                   label=f"{elbow_kwh:.1f} kWh — elbow, no threshold")
     ax.set_xlabel("battery capacity (kWh, nameplate)")
     ax.set_ylabel("marginal kWh/yr avoided per added kWh")
     ax.legend(frameon=False, labelcolor=FURNITURE, fontsize=8)
@@ -201,10 +206,13 @@ def _marginal_table(sweep: pd.DataFrame, recommended_kwh: float,
     Capped at ``max_kwh`` — beyond that both curves are flat and a full
     0-30 kWh table would be 61 uninformative rows.
     """
-    d = sweep[(sweep["power_kw"] == power_kw) & (sweep["capacity_kwh"] > 0)
-              & (sweep["capacity_kwh"] <= max_kwh)].sort_values("capacity_kwh")
+    share = benefit_share_pct(sweep, power_kw=power_kw)
+    full = sweep[sweep["power_kw"] == power_kw].sort_values("capacity_kwh").copy()
+    full["benefit_share_pct"] = share.to_numpy()
+    d = full[(full["capacity_kwh"] > 0) & (full["capacity_kwh"] <= max_kwh)]
     head = "".join(f"<th>{h}</th>" for h in
-                    ["capacity (kWh)", "non-EV marginal (kWh/yr per kWh)",
+                    ["capacity (kWh)", "share of achievable benefit",
+                     "non-EV marginal (kWh/yr per kWh)",
                      "all-nights marginal (kWh/yr per kWh)",
                      "non-EV night grid import (kWh/yr)", ""])
     rows = []
@@ -213,6 +221,7 @@ def _marginal_table(sweep: pd.DataFrame, recommended_kwh: float,
         note = "recommended" if np.isclose(r.capacity_kwh, recommended_kwh) else ""
         rows.append(
             f"<tr{cls}><td>{r.capacity_kwh:.1f}</td>"
+            f"<td>{r.benefit_share_pct:.1f}%</td>"
             f"<td>{r.nonev_marginal_kwh_per_kwh:.1f}</td>"
             f"<td>{r.marginal_kwh_per_kwh:.1f}</td>"
             f"<td>{r.nonev_night_grid_import_kwh_yr:.1f}</td>"
@@ -278,6 +287,7 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
     computes them from the same data the charts draw from, so a refreshed
     dataset moves the sentence along with the numbers.
     """
+    _elbow = elbow_capacity(sweep_df, power_kw=3.0)
     covered = nights_df[nights_df["covered"]]
     at = sweep_df[(sweep_df.power_kw == 3.0)
                   & np.isclose(sweep_df.capacity_kwh, recommended_kwh)]
@@ -333,8 +343,22 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
          "The all-nights curve would put the same threshold at 8.0 kWh "
          "instead of the recommended 7.5. A reader comparing \"under once a "
          "week\" against the reported cycles/yr figure above should keep "
-         "that distinction in mind.",
-         chart_marginal(sweep_df, recommended_kwh),
+         "that distinction in mind. "
+         f"<br><br><strong>If you distrust the threshold entirely, the curve "
+         f"answers on its own.</strong> The dash-dotted marker at "
+         f"{_elbow:.1f} kWh is the <em>elbow</em> — the point of greatest "
+         "perpendicular distance from the straight line joining the curve's "
+         "two ends. No judgement enters it, only the geometry. It lands "
+         f"within half a step of the threshold rule\u2019s "
+         f"{recommended_kwh:.1f} kWh, which is the main reason to trust "
+         "either. Note the elbow is <em>not</em> the inflection point: the "
+         "inflection sits at the peak of this curve, around 2.5 kWh, where "
+         "diminishing returns begin rather than end. "
+         "The <strong>share of achievable benefit</strong> column in the "
+         "table is the same idea without any curve-fitting \u2014 what "
+         "fraction of everything an effectively infinite battery could "
+         "deliver each size actually captures.",
+         chart_marginal(sweep_df, recommended_kwh, elbow_kwh=_elbow),
          _marginal_table(sweep_df, recommended_kwh)),
         ("When the battery actually works",
          "Discharge by month at the recommended capacity. The winter months "

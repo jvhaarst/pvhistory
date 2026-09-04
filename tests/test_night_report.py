@@ -131,3 +131,15 @@ def test_marginal_chart_plots_the_series_the_recommendation_uses(toy):
     import inspect
     src = inspect.getsource(night_report.chart_marginal)
     assert "nonev_marginal_kwh_per_kwh" in src
+
+
+def test_page_offers_a_threshold_free_reading_of_the_curve(toy):
+    """The 50 kWh/yr cut-off is a judgement call. The page must also give the
+    reader the two answers that need no judgement: the elbow (pure geometry)
+    and the share of achievable benefit."""
+    html = build_html(*toy, recommended_kwh=7.5, coverable_pct=48.2,
+                      negative_surplus_months=[11, 12, 1])
+    low = html.lower()
+    assert "elbow" in low
+    assert "share of achievable benefit" in low
+    assert "inflection" in low          # and that it is NOT the elbow

@@ -243,3 +243,69 @@ def recommend_capacity(
     if beyond.empty:
         return float(last)
     return float(beyond["capacity_kwh"].iloc[0])
+
+
+def _import_column(scenario: str) -> str:
+    return ("night_grid_import_kwh_yr" if scenario == "all"
+            else "nonev_night_grid_import_kwh_yr")
+
+
+def benefit_share_pct(
+    sweep_df: pd.DataFrame, power_kw: float = 3.0, scenario: str = "nonev"
+) -> pd.Series:
+    """Share of the achievable benefit each capacity captures, 0 to 100.
+
+    The denominator is the reduction in night grid import between the
+    smallest and largest simulated capacity. At the top of this project's
+    sweep the marginal return is about 1.2 kWh/yr per kWh, i.e. effectively
+    flat, so that endpoint stands in for an infinitely large battery.
+
+    This is the threshold-free way to read the curve: it needs no judgement
+    about what an extra kWh must earn, only the curve's own endpoints. It
+    answers "how much of what is possible does this size get me", which is
+    the question a buyer actually has.
+    """
+    col = _import_column(scenario)
+    d = sweep_df[sweep_df["power_kw"] == power_kw].sort_values("capacity_kwh")
+    y = d[col].to_numpy(dtype=float)
+    achievable = y[0] - y[-1]
+    if not achievable > 0:
+        return pd.Series(np.full(len(y), np.nan), index=d.index, name="benefit_share_pct")
+    return pd.Series(100.0 * (y[0] - y) / achievable, index=d.index,
+                     name="benefit_share_pct")
+
+
+def elbow_capacity(
+    sweep_df: pd.DataFrame, power_kw: float = 3.0, scenario: str = "nonev"
+) -> float:
+    """The bend in the import-versus-capacity curve, with no threshold at all.
+
+    Takes the point of maximum perpendicular distance from the straight chord
+    joining the curve's first and last points — the standard parameter-free
+    elbow method. Where `recommend_capacity` needs someone to decide what an
+    extra kWh must earn, this needs nothing: the curve's own geometry picks
+    the point where it stops bending and starts merely drifting.
+
+    Note this is NOT the inflection point. The inflection sits at the peak of
+    the marginal-return curve (about 2.5 kWh here), where diminishing returns
+    *begin*. The elbow is further out, where they have largely finished.
+
+    A perfectly straight curve has no bend; return the largest capacity
+    rather than an arbitrary interior point.
+    """
+    col = _import_column(scenario)
+    d = sweep_df[sweep_df["power_kw"] == power_kw].sort_values("capacity_kwh")
+    x = d["capacity_kwh"].to_numpy(dtype=float)
+    y = d[col].to_numpy(dtype=float)
+    if len(x) < 3:
+        return float(x[-1])
+
+    span = np.hypot(x[-1] - x[0], y[-1] - y[0])
+    if not span > 0:
+        return float(x[-1])
+    distance = np.abs(
+        (y[-1] - y[0]) * x - (x[-1] - x[0]) * y + x[-1] * y[0] - y[-1] * x[0]
+    ) / span
+    if np.allclose(distance, 0.0):
+        return float(x[-1])
+    return float(x[int(np.argmax(distance))])
