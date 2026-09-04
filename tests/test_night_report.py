@@ -51,26 +51,30 @@ def toy():
 
 
 def test_page_has_a_title_and_eight_charts(toy):
-    html = build_html(*toy, recommended_kwh=7.0)
+    html = build_html(*toy, recommended_kwh=7.0, coverable_pct=48.2,
+                       negative_surplus_months=[11, 12, 1])
     assert "<title>" in html
     assert html.count("<svg") == 8
 
 
 def test_page_omits_the_document_wrapper(toy):
-    html = build_html(*toy, recommended_kwh=7.0)
+    html = build_html(*toy, recommended_kwh=7.0, coverable_pct=48.2,
+                       negative_surplus_months=[11, 12, 1])
     for tag in ["<!doctype", "<html", "<head>", "<body>"]:
         assert tag not in html.lower()
 
 
 def test_page_embeds_no_raster_images(toy):
     """An embedded PNG trips the Artifact publish content scanner."""
-    html = build_html(*toy, recommended_kwh=7.0)
+    html = build_html(*toy, recommended_kwh=7.0, coverable_pct=48.2,
+                       negative_surplus_months=[11, 12, 1])
     assert "<image" not in html
     assert "data:image" not in html
 
 
 def test_page_defines_light_and_dark_palettes(toy):
-    html = build_html(*toy, recommended_kwh=7.0)
+    html = build_html(*toy, recommended_kwh=7.0, coverable_pct=48.2,
+                       negative_surplus_months=[11, 12, 1])
     assert "prefers-color-scheme: dark" in html
     assert '[data-theme="dark"]' in html
     assert '[data-theme="light"]' in html
@@ -78,11 +82,32 @@ def test_page_defines_light_and_dark_palettes(toy):
 
 def test_page_states_the_winter_finding(toy):
     """The single most important caveat: no battery charges in midwinter."""
-    html = build_html(*toy, recommended_kwh=7.0).lower()
+    html = build_html(*toy, recommended_kwh=7.0, coverable_pct=48.2,
+                       negative_surplus_months=[11, 12, 1]).lower()
     assert "winter" in html
     assert "negative" in html or "cannot" in html
 
 
 def test_page_labels_the_ev_rule_as_a_heuristic(toy):
-    html = build_html(*toy, recommended_kwh=7.0).lower()
+    html = build_html(*toy, recommended_kwh=7.0, coverable_pct=48.2,
+                       negative_surplus_months=[11, 12, 1]).lower()
     assert "heuristic" in html
+
+
+def test_winter_prose_follows_the_data_not_a_hardcoded_string(toy):
+    """The winter finding is the analysis's most important caveat. If the
+    dataset is ever refreshed, the prose must move with it."""
+    html = build_html(*toy, recommended_kwh=7.0, coverable_pct=61.5,
+                       negative_surplus_months=[12])
+    assert "61.5" in html
+    assert "48.2" not in html
+    assert "December" in html
+    assert "November" not in html
+
+
+def test_monthly_charts_do_not_trust_row_order(toy):
+    nights, sweep, monthly, sens = toy
+    shuffled = monthly.sample(frac=1.0, random_state=0).iloc[:9]
+    html = build_html(nights, sweep, shuffled, sens, recommended_kwh=7.0,
+                       coverable_pct=48.2, negative_surplus_months=[11, 12, 1])
+    assert html.count("<svg") == 8

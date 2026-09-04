@@ -20,6 +20,30 @@ from .report import COVERAGE_CMAP, FURNITURE, SERIES, STYLE, _svg  # noqa: E402,
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
+               "July", "August", "September", "October", "November",
+               "December"]
+
+
+def _by_month(monthly: pd.DataFrame) -> pd.DataFrame:
+    """Twelve rows, January first, whatever the caller passed.
+
+    The charts label months by position, so trusting the caller's row order
+    would silently mislabel a frame that happened to be sorted differently.
+    A missing month becomes NaN and simply renders as a gap.
+    """
+    return monthly.set_index("month").reindex(range(1, 13)).reset_index()
+
+
+def _join_month_names(months: list[int]) -> str:
+    """"November, December and January" from [11, 12, 1] — order preserved,
+    no Oxford comma, singular list reads as a bare name."""
+    names = [MONTH_NAMES[m - 1] for m in months]
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def chart_night_distribution(nights: pd.DataFrame) -> str:
@@ -58,9 +82,10 @@ def chart_night_by_month(nights: pd.DataFrame) -> str:
 def chart_surplus_vs_need(monthly: pd.DataFrame) -> str:
     """The winter wall: months where surplus is negative can charge nothing."""
     fig, ax = plt.subplots(figsize=(9, 4))
+    m = _by_month(monthly)
     x = np.arange(12)
-    ax.bar(x - 0.2, monthly["surplus_kwh"], 0.4, color=SERIES[2], label="daytime surplus")
-    ax.bar(x + 0.2, monthly["night_kwh"], 0.4, color=SERIES[1], label="night need")
+    ax.bar(x - 0.2, m["surplus_kwh"], 0.4, color=SERIES[2], label="daytime surplus")
+    ax.bar(x + 0.2, m["night_kwh"], 0.4, color=SERIES[1], label="night need")
     ax.axhline(0, color=FURNITURE, lw=1)
     ax.set_xticks(x)
     ax.set_xticklabels(MONTHS)
@@ -101,7 +126,8 @@ def chart_marginal(sweep: pd.DataFrame, recommended_kwh: float,
 
 def chart_utilisation(monthly: pd.DataFrame) -> str:
     fig, ax = plt.subplots(figsize=(9, 3.4))
-    ax.bar(np.arange(12), monthly["discharge_kwh"], color=SERIES[0])
+    m = _by_month(monthly)
+    ax.bar(np.arange(12), m["discharge_kwh"], color=SERIES[0])
     ax.set_xticks(np.arange(12))
     ax.set_xticklabels(MONTHS)
     ax.set_ylabel("battery discharge (kWh)")
@@ -124,9 +150,10 @@ def chart_night_self_sufficiency(sweep: pd.DataFrame, recommended_kwh: float) ->
 def chart_above_cap(monthly: pd.DataFrame) -> str:
     """Night energy a 3 kW inverter physically cannot supply."""
     fig, ax = plt.subplots(figsize=(9, 3.6))
+    m = _by_month(monthly)
     x = np.arange(12)
-    ax.bar(x - 0.2, monthly["above_cap_pct_ev"], 0.4, color=SERIES[1], label="EV nights")
-    ax.bar(x + 0.2, monthly["above_cap_pct_nonev"], 0.4, color=SERIES[0], label="household nights")
+    ax.bar(x - 0.2, m["above_cap_pct_ev"], 0.4, color=SERIES[1], label="EV nights")
+    ax.bar(x + 0.2, m["above_cap_pct_nonev"], 0.4, color=SERIES[0], label="household nights")
     ax.set_xticks(x)
     ax.set_xticklabels(MONTHS)
     ax.set_ylabel("% of night energy drawn above 3 kW")
@@ -163,10 +190,44 @@ def _sensitivity_table(sens: pd.DataFrame) -> str:
             f"<tbody>{body}</tbody></table></div>")
 
 
+def _winter_wall_prose(coverable_pct: float, negative_surplus_months: list[int]) -> str:
+    """The winter finding, built from real figures rather than literals.
+
+    This is the analysis's single most important caveat, so it must move
+    with the data: a refreshed dataset changes ``coverable_pct`` and
+    ``negative_surplus_months``, and this sentence changes with it.
+    """
+    if negative_surplus_months:
+        names = _join_month_names(negative_surplus_months)
+        wall = (
+            f"In {names} the surplus is <strong>negative</strong> — the "
+            "house does not generate enough to cover even its daytime "
+            "load, so no battery of any size receives a charge."
+        )
+    else:
+        wall = (
+            "No month in this dataset has a negative median daytime "
+            "surplus, so winter alone does not block charging here."
+        )
+    return (
+        "Median daytime surplus against median night need, per month. "
+        f"{wall} Across all six years only {coverable_pct:.1f}% of nights "
+        "could be covered even with infinite storage. This, not capacity, "
+        "is what bounds the answer."
+    )
+
+
 def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
                 monthly_df: pd.DataFrame, sensitivity_df: pd.DataFrame,
-                recommended_kwh: float) -> str:
-    """Assemble the report. No document wrapper — the host supplies it."""
+                recommended_kwh: float, coverable_pct: float,
+                negative_surplus_months: list[int]) -> str:
+    """Assemble the report. No document wrapper — the host supplies it.
+
+    ``coverable_pct`` and ``negative_surplus_months`` drive the winter-wall
+    prose directly, rather than being restated as literals: the caller
+    computes them from the same data the charts draw from, so a refreshed
+    dataset moves the sentence along with the numbers.
+    """
     covered = nights_df[nights_df["covered"]]
     at = sweep_df[(sweep_df.power_kw == 3.0)
                   & np.isclose(sweep_df.capacity_kwh, recommended_kwh)]
@@ -193,12 +254,7 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
          "roughly three times a midsummer night.",
          chart_night_by_month(nights_df)),
         ("The winter wall",
-         "Median daytime surplus against median night need, per month. In "
-         "November, December and January the surplus is <strong>negative</strong> "
-         "— the house does not generate enough to cover even its daytime load, "
-         "so no battery of any size receives a charge. Across all six years "
-         "only 48.2% of nights could be covered even with infinite storage. "
-         "This, not capacity, is what bounds the answer.",
+         _winter_wall_prose(coverable_pct, negative_surplus_months),
          chart_surplus_vs_need(monthly_df)),
         ("How much capacity is worth buying",
          "Night grid import against capacity, with and without EV nights. "
