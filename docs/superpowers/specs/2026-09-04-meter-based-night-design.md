@@ -83,8 +83,8 @@ declines year on year, which fits a lost phase whose share of load is
   | 2024-01-18 23:00 | 2 h 15 m |
   | 2024-07-19 07:45 | 2 h 45 m |
 
-  Five of the seven fall in **January 2024**, together removing most of
-  8–19 January — midwinter, when night consumption is at its annual peak. Any
+  Four of the seven fall in **January 2024**, together removing most of
+  8–19 January (the fifth 2024 gap is in July) — midwinter, when night consumption is at its annual peak. Any
   2024 figure must exclude affected nights rather than treat them as low
   ones, and the report must say how many nights that removes.
 - **31,528 intervals (13.5%) carry both import and export.** §4.2 turns this
