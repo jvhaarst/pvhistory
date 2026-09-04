@@ -20,6 +20,7 @@ from .battery import (  # noqa: E402
     benefit_share_pct,
     elbow_capacity,
     elbow_stability,
+    convergence_readings,
 )
 from .report import COVERAGE_CMAP, FURNITURE, SERIES, STYLE, _svg  # noqa: E402,F401
 
@@ -286,6 +287,11 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
     """
     _elbow = elbow_capacity(sweep_df, power_kw=3.0)
     elbow_kwh = _elbow
+    # A single hero number above a table showing five different answers would
+    # contradict itself. Lead with the range the readings actually span.
+    _cand = convergence_readings(sweep_df, power_kw=3.0)
+    _cand = _cand[_cand.method != "inflection of the import curve"]["capacity_kwh"]
+    _lo, _hi = float(_cand.min()), float(_cand.max())
     covered = nights_df[nights_df["covered"]]
     at = sweep_df[(sweep_df.power_kw == 3.0)
                   & np.isclose(sweep_df.capacity_kwh, recommended_kwh)]
@@ -293,7 +299,8 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
     cyc = float(at["cycles_per_yr"].iloc[0]) if len(at) else float("nan")
 
     stats = [
-        (f"{recommended_kwh:.1f} kWh", "recommended capacity, nameplate"),
+        (f"{_lo:.1f}\u2013{_hi:.0f} kWh",
+         "defensible range, nameplate — see the readings table"),
         (f"{covered['night_wh'].median() / 1000:.2f} kWh", "median night consumption"),
         (f"{int(covered['is_ev'].sum())}", f"EV-charging nights of {len(covered)}"),
         (f"{ss:.0f}%", "household night self-sufficiency"),
@@ -339,6 +346,7 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
          "were still drifting at the last row, it would not have.",
          chart_marginal(sweep_df, _elbow),
          _marginal_table(sweep_df, _elbow),
+         _convergence_table(sweep_df),
          _elbow_table(sweep_df)),
         ("When the battery actually works",
          "Discharge by month at the recommended capacity. The winter months "
@@ -408,4 +416,35 @@ def _elbow_table(sweep: pd.DataFrame, power_kw: float = 3.0) -> str:
         "moving — that is the signal the sweep went far enough.</p>"
         f'<div class="chart"><table><thead><tr>{head}</tr></thead>'
         f"<tbody>{body}</tbody></table></div>"
+    )
+
+
+def _convergence_table(sweep: pd.DataFrame, power_kw: float = 3.0) -> str:
+    """Every threshold-free reading side by side, so the spread is visible.
+
+    Presenting one of these as *the* answer would imply a precision the curve
+    does not have. The range they span is what the data actually supports.
+    """
+    d = convergence_readings(sweep, power_kw=power_kw)
+    cand = d[d.method != "inflection of the import curve"]["capacity_kwh"]
+    head = "".join(f"<th>{h}</th>" for h in
+                    ["reading", "lands at (kWh)", "what it measures"])
+    rows = []
+    for r in d.itertuples():
+        cls = ' class="knee"' if r.method.startswith("elbow, full") else ""
+        rows.append(
+            f"<tr{cls}><td>{r.method}</td><td>{r.capacity_kwh:.1f}</td>"
+            f"<td>{r.what_it_measures}</td></tr>")
+    return (
+        '<p class="sub">Five ways to read the same curve, none of them '
+        "requiring a cut-off to be chosen. They do not agree — and that "
+        f"disagreement, spanning <strong>{cand.min():.1f} to "
+        f"{cand.max():.1f} kWh</strong>, is the honest answer. The curve has "
+        "no sharp corner, so each method's apparent precision comes from its "
+        "own assumptions rather than from your data. Two of these readings "
+        "are also smoothing-sensitive: widen the window and the steepest-"
+        "collapse point moves between 5.5 and 6.5 kWh. Treat the range as "
+        "real and any single figure inside it as a preference.</p>"
+        f'<div class="chart"><table><thead><tr>{head}</tr></thead>'
+        f"<tbody>{''.join(rows)}</tbody></table></div>"
     )

@@ -159,3 +159,14 @@ def test_page_offers_a_threshold_free_reading_of_the_curve(toy):
     assert "elbow" in low
     assert "share of achievable benefit" in low
     assert "inflection" in low          # and that it is NOT the elbow
+
+
+def test_page_leads_with_a_range_not_a_false_precision(toy):
+    """Five threshold-free readings of the curve disagree by 2.5 kWh. Leading
+    with one of them would imply a precision the curve does not have."""
+    html = build_html(*toy, recommended_kwh=8.0, coverable_pct=48.2,
+                      negative_surplus_months=[11, 12, 1])
+    low = html.lower()
+    assert "defensible range" in low
+    assert "reading" in low and "what it measures" in low
+    assert "no sharp corner" in low

@@ -351,3 +351,54 @@ def elbow_stability(
             "top_end_marginal": float(tail),
         })
     return pd.DataFrame(rows, columns=["sweep_top_kwh", "elbow_kwh", "top_end_marginal"])
+
+
+def convergence_readings(
+    sweep_df: pd.DataFrame, power_kw: float = 3.0, scenario: str = "nonev"
+) -> pd.DataFrame:
+    """Every threshold-free reading of the capacity curve, side by side.
+
+    None of these is authoritative, and that is the point of showing them
+    together. The curve has no sharp corner, so each method's apparent
+    precision comes from its own assumptions rather than from the data. What
+    the data supports is the range they span, not any one of them.
+
+    The inflection of the import curve is included for orientation but is not
+    a candidate size: it marks where diminishing returns *begin*, and a
+    battery that small captures well under a third of the achievable benefit.
+
+    Note the two elbow rows differ only in where the measurement window
+    starts. That the answer moves at all is the honest caveat on the method.
+    """
+    col = _import_column(scenario)
+    marg = ("marginal_kwh_per_kwh" if scenario == "all"
+            else "nonev_marginal_kwh_per_kwh")
+    d = sweep_df[sweep_df["power_kw"] == power_kw].sort_values("capacity_kwh")
+    x = d["capacity_kwh"].to_numpy(dtype=float)
+    y = d[col].to_numpy(dtype=float)
+    m = d[marg].to_numpy(dtype=float)
+
+    inflection = float(x[int(np.nanargmax(m))])
+    beyond = x > inflection
+    dm = np.gradient(np.nan_to_num(m, nan=np.nanmean(m)), x)
+    steepest = float(x[beyond][int(np.nanargmin(dm[beyond]))])
+    marg_infl = float(x[beyond][int(np.nanargmax(np.gradient(dm, x)[beyond]))])
+
+    from_inflection = sweep_df[sweep_df["capacity_kwh"] >= inflection]
+
+    return pd.DataFrame(
+        [
+            ("inflection of the import curve", inflection,
+             "where diminishing returns begin — not a size to buy"),
+            ("steepest collapse of marginal return", steepest,
+             "where each added kWh loses value fastest"),
+            ("inflection of the marginal curve", marg_infl,
+             "where that collapse stops accelerating"),
+            ("elbow, full sweep", elbow_capacity(sweep_df, power_kw, scenario),
+             "greatest distance from the chord across 0-30 kWh"),
+            ("elbow, measured from the inflection", 
+             elbow_capacity(from_inflection, power_kw, scenario),
+             "the same method, started past the leading rise"),
+        ],
+        columns=["method", "capacity_kwh", "what_it_measures"],
+    )

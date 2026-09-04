@@ -4,6 +4,7 @@ import pytest
 
 from pvnight.battery import (
     benefit_share_pct,
+    convergence_readings,
     build_masks,
     elbow_capacity,
     elbow_stability,
@@ -256,3 +257,34 @@ def test_elbow_stability_on_the_real_sweep(real_sweep):
     assert got[10.0] == pytest.approx(6.0)
     assert got[25.0] == pytest.approx(8.0)
     assert got[30.0] == pytest.approx(8.0)
+
+
+def test_convergence_readings_names_each_method_and_its_answer():
+    """No single geometric reading is authoritative; the table exists to show
+    they disagree, and by how little."""
+    s = pd.DataFrame({
+        "capacity_kwh": np.arange(0.0, 6.1, 0.5),
+        "power_kw": 3.0,
+        "nonev_night_grid_import_kwh_yr": 100 * np.exp(-np.arange(0.0, 6.1, 0.5) / 2),
+    })
+    s["nonev_marginal_kwh_per_kwh"] = -s.nonev_night_grid_import_kwh_yr.diff() / s.capacity_kwh.diff()
+    out = convergence_readings(s, power_kw=3.0)
+    assert list(out.columns) == ["method", "capacity_kwh", "what_it_measures"]
+    assert len(out) == 5
+    assert out["capacity_kwh"].notna().all()
+    assert out["method"].is_unique
+
+
+def test_convergence_readings_on_the_real_sweep(real_sweep):
+    """Measured: the five readings land between 2.5 and 9.0, with the four
+    candidate sizes clustered in 6.5-9.0."""
+    out = convergence_readings(real_sweep, power_kw=3.0).set_index("method")
+    got = out["capacity_kwh"]
+    assert got["inflection of the import curve"] == pytest.approx(2.5)
+    assert got["steepest collapse of marginal return"] == pytest.approx(6.5)
+    assert got["inflection of the marginal curve"] == pytest.approx(7.0)
+    assert got["elbow, full sweep"] == pytest.approx(8.0)
+    assert got["elbow, measured from the inflection"] == pytest.approx(9.0)
+    candidates = got.drop("inflection of the import curve")
+    assert candidates.min() == pytest.approx(6.5)
+    assert candidates.max() == pytest.approx(9.0)
