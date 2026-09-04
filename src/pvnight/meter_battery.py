@@ -1,10 +1,9 @@
-"""Battery simulation driven by the meter, at both bounds of the
-within-interval ambiguity.
+"""Battery simulation driven by the meter, at both within-interval orderings.
 
 A 15-minute interval can record both import and export, and 13.5% of them do.
-Collapsing them to a net figure hides export the battery could have stored;
-treating them as fully separable credits it with more than it could certainly
-have done. Both are run, and the pair is the answer.
+The meter cannot say which came first, and that ordering decides how much of
+the import a battery could have bridged with the export. `charge_first` and
+`discharge_first` are run as a bracket; neither is the answer on its own.
 """
 
 from __future__ import annotations
@@ -16,24 +15,32 @@ from .battery import BatterySpec, simulate
 from .meter import DT_HOURS
 
 
-def bound_signals(meter_df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    """`(net_wh, gross_wh)` per interval, in Wh.
+def bound_signals(meter_df: pd.DataFrame) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """`{name: (signal_wh, source_idx)}` for the two within-interval orderings.
 
-    `net` is export minus import, the conservative reading: the two flows are
-    collapsed, so an interval that carried both looks like whichever won.
-    `gross` always adds back the smaller, cancelling flow on top of `net`,
-    in either direction — as if the battery had captured it before the
-    larger flow arrived. `both = min(import, export) >= 0`, so `gross` is
-    never worse than `net` in a single interval, which is what guarantees
-    the two bounds stay correctly ordered after the full simulation too.
+    The meter cannot say whether the export or the import came first inside a
+    quarter hour, and that ordering decides how much a battery could bridge.
+    `charge_first` stores the export then spends it on the import;
+    `discharge_first` meets the import before the export exists. Both
+    reproduce the measured grid import exactly at zero capacity, which is what
+    makes them a genuine bracket rather than two different questions.
     """
     m = meter_df.sort_values("ts_utc")
     imp = m["import_kwh"].to_numpy(dtype=float) * 1000.0
     exp = m["export_kwh"].to_numpy(dtype=float) * 1000.0
-    net = exp - imp
-    both = np.minimum(imp, exp)
-    gross = net + both
-    return net, gross
+    n = len(imp)
+    src = np.repeat(np.arange(n), 2)
+
+    charge_first = np.empty(2 * n, dtype=float)
+    charge_first[0::2] = exp
+    charge_first[1::2] = -imp
+
+    discharge_first = np.empty(2 * n, dtype=float)
+    discharge_first[0::2] = -imp
+    discharge_first[1::2] = exp
+
+    return {"charge_first": (charge_first, src),
+            "discharge_first": (discharge_first, src)}
 
 
 def _masks(meter_df: pd.DataFrame, nights_df: pd.DataFrame):
@@ -63,13 +70,15 @@ def sweep_bounds(
 ) -> pd.DataFrame:
     """Phase 2's sweep metrics, once per bound."""
     m = meter_df.sort_values("ts_utc")
-    night, nonev, month = _masks(m, nights_df)
+    night_i, nonev_i, month_i = _masks(m, nights_df)
     span = (m["ts_utc"].iloc[-1] - m["ts_utc"].iloc[0]).total_seconds()
     years = span / (365.25 * 24 * 3600)
-    signals = dict(zip(("net", "gross"), bound_signals(m)))
 
     frames = []
-    for name, sig in signals.items():
+    for name, (sig, src) in bound_signals(m).items():
+        night = night_i[src]
+        nonev = nonev_i[src]
+        month = month_i[src]
         night_load = -sig[night & (sig < 0)].sum()
         nonev_load = -sig[nonev & (sig < 0)].sum()
         night_load = night_load if night_load > 0 else np.nan
