@@ -101,6 +101,27 @@ def test_coverage_flags_nights_with_missing_samples():
     assert not bool(out.loc[0, "covered"])
 
 
+def test_a_mid_day_energy_gap_is_not_silently_zeroed():
+    """A NaN energy reading is unrecorded, not zero, and the real increment
+    on the row after the gap must not be discarded either."""
+    s = _samples([
+        ("2023-06-01T20:00", dt.date(2023, 6, 1), 100.0, 0.0),
+        ("2023-06-01T20:05", dt.date(2023, 6, 1), 100.0, 100.0),
+        ("2023-06-01T20:10", dt.date(2023, 6, 1), 100.0, np.nan),
+        ("2023-06-01T20:15", dt.date(2023, 6, 1), 100.0, 250.0),
+    ])
+    inc = consumption_increments(s)
+    assert inc.iloc[0] == 0.0            # first of day, artefact of diff()
+    assert inc.iloc[1] == 100.0
+    assert np.isnan(inc.iloc[2])         # genuine gap, NOT zero
+    assert np.isnan(inc.iloc[3])         # increment across the gap is unknown
+
+    w = _one_night_window("2023-06-01T20:00", "2023-06-01T20:20")
+    out = summarise_nights(s, w, min_coverage=0.0)
+    assert out.loc[0, "missing_increments"] == 2
+    assert not bool(out.loc[0, "covered"])   # a gap disqualifies the night
+
+
 @pytest.fixture(scope="session")
 def real_nights(loaded):
     w = pd.read_csv(
@@ -127,6 +148,18 @@ def test_real_data_reproduces_the_measured_ev_split(real_nights):
     assert len(ev) == 72
     assert ev["night_wh"].median() / 1000 == pytest.approx(24.5, abs=0.3)
     assert rest["night_wh"].median() / 1000 == pytest.approx(4.71, abs=0.05)
+
+
+def test_the_null_safe_fix_does_not_move_the_published_figures(real_nights):
+    """Every energy_cons_wh null in this dataset coincides with a
+    power_cons_w null, so the stricter rule is inert here. Pin that, so a
+    future data drop that breaks the correlation shows up as a test failure
+    rather than as a silently different answer."""
+    c = real_nights[real_nights["covered"]]
+    c = c[(c["date"] >= "2020-05-20") & (c["date"] <= "2025-12-30")]
+    assert len(c) == 2031
+    assert c["night_wh"].median() / 1000 == pytest.approx(4.85, abs=0.05)
+    assert int(c["is_ev"].sum()) == 72
 
 
 def test_the_ev_heuristic_has_a_known_false_positive_rate(real_nights):
