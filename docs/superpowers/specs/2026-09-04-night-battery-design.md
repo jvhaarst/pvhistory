@@ -107,9 +107,10 @@ the 2,031 nights with better than 95% sample coverage, spanning 2020-05-20 to
    as a finding.
 
 10. **Consumption nulls are preserved, not zero-filled** (inherited from phase 1,
-    spec §3 there): 1,315 rows have no `Power Consumption` reading, concentrated
-    in 2020 and 2022. A null means unrecorded, not zero. Nights below 95%
-    sample coverage are therefore excluded from per-night statistics (§3).
+    spec §3 there): `power_cons_w` has 1,505 rows with no reading and
+    `energy_cons_wh` has 1,315, concentrated in 2020 and 2022. A null means
+    unrecorded, not zero. Nights below 95% sample coverage are therefore
+    excluded from per-night statistics (§3).
 
 ## 3. Night aggregation and EV classification
 

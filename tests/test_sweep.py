@@ -42,6 +42,49 @@ def test_masks_mark_the_right_intervals():
     assert month.tolist() == [5, 5, 6]              # 0-based month index
 
 
+def test_uncovered_nights_are_excluded_from_the_masks():
+    """`covered` is the contract that a night's energy is gap-free. If
+    build_masks ignored it, gap-corrupted nights would re-enter the night
+    metrics through the back door."""
+    s = pd.DataFrame({
+        "ts_utc": pd.to_datetime(
+            ["2023-06-01T21:00", "2023-06-02T21:00"], utc=True
+        ),
+        "power_gen_w": [0.0, 0.0],
+        "power_cons_w": [100.0, 100.0],
+    })
+    n = pd.DataFrame([
+        {"date": pd.Timestamp("2023-06-01"),
+         "night_start_utc": pd.Timestamp("2023-06-01T20:00", tz="UTC"),
+         "night_end_utc": pd.Timestamp("2023-06-01T23:00", tz="UTC"),
+         "is_ev": False, "covered": False},
+        {"date": pd.Timestamp("2023-06-02"),
+         "night_start_utc": pd.Timestamp("2023-06-02T20:00", tz="UTC"),
+         "night_end_utc": pd.Timestamp("2023-06-02T23:00", tz="UTC"),
+         "is_ev": False, "covered": True},
+    ])
+    night, nonev, _ = build_masks(s, n)
+    assert night.tolist() == [False, True]
+    assert nonev.tolist() == [False, True]
+
+
+def test_sweep_survives_a_frame_where_every_night_is_uncovered(recwarn):
+    """With no covered night there is no night-time deficit, so the
+    self-sufficiency denominators are zero. That must yield NaN deliberately,
+    not a RuntimeWarning and an incidental NaN."""
+    idx = pd.date_range("2023-06-01", periods=500, freq="5min", tz="UTC")
+    s = pd.DataFrame({"ts_utc": idx, "power_gen_w": 1000.0, "power_cons_w": 400.0})
+    n = pd.DataFrame([{
+        "date": idx[0].date(),
+        "night_start_utc": idx[0], "night_end_utc": idx[-1],
+        "is_ev": False, "covered": False,
+    }])
+    out = sweep(s, n, capacities_kwh=np.array([0.0, 5.0]), power_kws=(3.0,))
+    assert len(out) == 2
+    assert out["night_self_sufficiency_pct"].isna().all()
+    assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]
+
+
 def _toy_inputs():
     idx = pd.date_range("2023-06-01", periods=2000, freq="5min", tz="UTC")
     gen = np.where((idx.hour > 8) & (idx.hour < 17), 2500.0, 0.0)

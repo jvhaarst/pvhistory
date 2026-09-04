@@ -168,6 +168,11 @@ def sweep(
 
     night_load = -net[night & (net < 0)].sum()
     nonev_load = -net[nonev & (net < 0)].sum()
+    # Zero night-time deficit — no covered nights, or none in the mask.
+    # Make the resulting NaN deliberate rather than an incidental 0/0 with a
+    # RuntimeWarning, matching the np.where guard used for `usable` below.
+    night_load = night_load if night_load > 0 else np.nan
+    nonev_load = nonev_load if nonev_load > 0 else np.nan
 
     frames = []
     for p in power_kws:
