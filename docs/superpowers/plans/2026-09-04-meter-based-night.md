@@ -1112,7 +1112,7 @@ confirmed unless it appears in output you have seen.
 - **Phase 2's numbers must not move.** The only change to its code is an
   additive keyword with the old value as default. Task 3 step 6 checks this
   explicitly; if it fails, stop rather than adjusting phase 2's tests.
-- **The gaps are not noise.** Five of seven fall in January 2024 and remove
+- **The gaps are not noise.** Four of the seven fall in January 2024 and remove
   most of 8-19 January. Nights touching them are excluded, and the report says
   how many. Treating them as low-consumption nights would understate midwinter
   demand — the season that already dominates the answer.
