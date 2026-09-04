@@ -58,6 +58,7 @@ def simulate(
     nonev_mask: np.ndarray,
     month_idx: np.ndarray,
     spec: BatterySpec,
+    dt_hours: float = DT_HOURS,
 ) -> SimResult:
     """Run the whole timeline once for every capacity in `spec`.
 
@@ -70,7 +71,10 @@ def simulate(
     caps = spec.usable_wh
     n = len(caps)
     eta = spec.eta
-    limit_wh = spec.power_kw * 1000.0 * DT_HOURS
+    # The interval length is a parameter because the meter data is 15-minute
+    # where PVOutput is 5-minute. The power cap converts to an energy limit
+    # per interval, so it is the one place resolution genuinely bites.
+    limit_wh = spec.power_kw * 1000.0 * dt_hours
 
     stored = np.zeros(n)
     charge = np.zeros(n)
