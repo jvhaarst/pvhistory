@@ -219,10 +219,10 @@ def recommend_capacity(
     can choose differently.
     """
     col = "marginal_kwh_per_kwh" if scenario == "all" else "nonev_marginal_kwh_per_kwh"
-    d = sweep_df[sweep_df["power_kw"] == power_kw].sort_values("capacity_kwh")
-    d = d[d[col].notna()]
+    d_power = sweep_df[sweep_df["power_kw"] == power_kw].sort_values("capacity_kwh")
+    d = d_power[d_power[col].notna()]
     if d.empty:
-        return float(sweep_df["capacity_kwh"].max())
+        return float(d_power["capacity_kwh"].max())
 
     at_or_above = d[d[col] >= threshold_kwh_per_kwh]
     if at_or_above.empty:

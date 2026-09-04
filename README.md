@@ -76,7 +76,9 @@ window (`night_start_utc`/`night_end_utc`), total night consumption
 (`night_wh`), `peak_w`, `hours_above_2kw`, `is_ev` (charging-shaped night),
 data `coverage` for that night and `missing_increments`/`dst_hour_missing`
 flags, and `covered` (whether the night has enough data to trust its total).
-Across 2,031 covered nights (2020-05-20 to 2025-12-30), median night
+Raw samples start 2020-05-20, but the first four nights fail the coverage
+filter, so the covered range genuinely begins a few days later. Across
+2,031 covered nights (2020-05-24 to 2025-12-30), median night
 consumption is 4.85 kWh (p90 10.52 kWh); 72 of those nights are EV-charging,
 at a median of 24.5 kWh against 4.71 kWh for the rest.
 

@@ -145,3 +145,28 @@ def test_recommend_ignores_a_low_marginal_return_at_tiny_capacity():
         "nonev_marginal_kwh_per_kwh": [np.nan, 36.8, 113.3, 134.0, 60.0, 41.3, 13.6],
     })
     assert recommend_capacity(df, power_kw=3.0, threshold_kwh_per_kwh=50.0) == 4.0
+
+
+def test_recommend_falls_back_when_the_curve_never_meets_the_threshold():
+    """A curve entirely below the threshold means even the first kWh does not
+    pay. Recommend the smallest capacity rather than silently the largest."""
+    df = pd.DataFrame({
+        "capacity_kwh": [0.0, 1.0, 2.0],
+        "power_kw": 3.0,
+        "marginal_kwh_per_kwh": np.nan,
+        "nonev_marginal_kwh_per_kwh": [np.nan, 10.0, 5.0],
+    })
+    assert recommend_capacity(df, power_kw=3.0, threshold_kwh_per_kwh=50.0) == 1.0
+
+
+def test_recommend_returns_the_largest_capacity_when_return_never_falls_off():
+    """If the marginal return is still above the threshold at the top of the
+    sweep, the sweep was too narrow — return its maximum rather than inventing
+    a capacity beyond what was simulated."""
+    df = pd.DataFrame({
+        "capacity_kwh": [0.0, 1.0, 2.0],
+        "power_kw": 3.0,
+        "marginal_kwh_per_kwh": np.nan,
+        "nonev_marginal_kwh_per_kwh": [np.nan, 900.0, 800.0],
+    })
+    assert recommend_capacity(df, power_kw=3.0, threshold_kwh_per_kwh=50.0) == 2.0

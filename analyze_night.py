@@ -146,6 +146,8 @@ def run(data_dir: Path, out_dir: Path) -> dict:
         "night_self_sufficiency_pct": float(at["nonev_night_self_sufficiency_pct"]),
         "cycles_per_yr": float(at["cycles_per_yr"]),
         "pct_gain_from_3p7kw_inverter": power_gain,
+        "first_night": str(covered_nights["date"].min().date()),
+        "last_night": str(covered_nights["date"].max().date()),
     }
 
 

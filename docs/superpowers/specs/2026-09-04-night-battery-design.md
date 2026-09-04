@@ -28,8 +28,9 @@ and a report.
 ### 2.1 Established facts
 
 Measured during design against the real data, not assumed. Percentages are of
-the 2,031 nights with better than 95% sample coverage, spanning 2020-05-20 to
-2025-12-30.
+the 2,031 nights with better than 95% sample coverage, spanning 2020-05-24 to
+2025-12-30. Raw samples begin on 2020-05-20, but the first four nights fail
+the coverage filter, so the covered range starts later than the data does.
 
 1. **Night consumption is heavily right-skewed.** Median 4.85 kWh, p90 10.52,
    p99 29.66, max 44.53. The mean (6.04) exceeds the median by 25%, so every

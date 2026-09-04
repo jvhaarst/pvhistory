@@ -17,6 +17,13 @@ def test_run_writes_all_three_outputs(tmp_path, data_dir):
     assert s["median_night_kwh"] == pytest.approx(4.85, abs=0.05)
     assert 0 < s["recommended_kwh"] <= 30
 
+    # Derived from the covered nights, the same way coverable_pct already is
+    # — not retyped as a literal, so a data refresh can't leave it stale.
+    # Raw samples start 2020-05-20, but the first four nights fail the
+    # coverage filter, so the covered range genuinely begins later.
+    assert s["first_night"] == "2020-05-24"
+    assert s["last_night"] == "2025-12-30"
+
 
 def test_power_cap_sensitivity_is_measured_not_assumed(tmp_path, data_dir):
     """Spec fact 9 says the 3 kW charge cap is *expected* not to bind, and
