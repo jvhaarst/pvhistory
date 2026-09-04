@@ -222,11 +222,16 @@ def recommend_capacity(
     leading edge of that climb and returns a degenerate answer.
 
     So: find the largest capacity still at or above the threshold, and
-    recommend the next step up. An extra kWh earning less than
-    `threshold_kwh_per_kwh` per year is cycling under about once a week,
-    which is hard to justify buying. The threshold is a stated judgement,
-    not a derived constant — the report prints the whole curve so a reader
-    can choose differently.
+    recommend the next step up.
+
+    NOT USED BY THE REPORT. The default 50 kWh/yr threshold was a judgement
+    call — reasoned from "an extra kWh cycling under once a week is hard to
+    justify", but never derived from a battery price, a tariff, or any
+    measurement. The report therefore uses `elbow_capacity` instead, which
+    needs no such choice. This function is kept because the rule is sound
+    once the threshold is a real number: divide battery cost per kWh by your
+    electricity rate over the warranty period to get the kWh/yr a marginal
+    kWh must return, and pass that as `threshold_kwh_per_kwh`.
     """
     col = "marginal_kwh_per_kwh" if scenario == "all" else "nonev_marginal_kwh_per_kwh"
     d_power = sweep_df[sweep_df["power_kw"] == power_kw].sort_values("capacity_kwh")
@@ -309,3 +314,40 @@ def elbow_capacity(
     if np.allclose(distance, 0.0):
         return float(x[-1])
     return float(x[int(np.argmax(distance))])
+
+
+def elbow_stability(
+    sweep_df: pd.DataFrame,
+    power_kw: float = 3.0,
+    tops: tuple[float, ...] = (10.0, 15.0, 20.0, 25.0, 30.0),
+    scenario: str = "nonev",
+) -> pd.DataFrame:
+    """How the elbow moves as the sweep is truncated at different capacities.
+
+    The elbow is often described as parameter-free, and it needs no threshold
+    — but it is not assumption-free: it depends on where the curve ends,
+    because the chord it measures against is drawn to that endpoint. On this
+    installation it reads 6.0 kWh from a 0-10 kWh sweep and settles at 8.0
+    once the sweep reaches 25 kWh and the top end has gone flat.
+
+    Publishing this table is the honest alternative to claiming an
+    independence the method does not have. A reader can see for themselves
+    whether the sweep was carried far enough for the answer to have settled.
+    """
+    rows = []
+    d_all = sweep_df[sweep_df["power_kw"] == power_kw].sort_values("capacity_kwh")
+    col = _import_column(scenario)
+    marg = ("marginal_kwh_per_kwh" if scenario == "all"
+            else "nonev_marginal_kwh_per_kwh")
+    for top in tops:
+        sub = sweep_df[sweep_df["capacity_kwh"] <= top]
+        d = d_all[d_all["capacity_kwh"] <= top]
+        if len(d) < 3:
+            continue
+        tail = d[marg].to_numpy(dtype=float)[-1] if marg in d else np.nan
+        rows.append({
+            "sweep_top_kwh": float(top),
+            "elbow_kwh": elbow_capacity(sub, power_kw=power_kw, scenario=scenario),
+            "top_end_marginal": float(tail),
+        })
+    return pd.DataFrame(rows, columns=["sweep_top_kwh", "elbow_kwh", "top_end_marginal"])

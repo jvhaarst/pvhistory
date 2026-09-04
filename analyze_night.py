@@ -113,7 +113,12 @@ def run(data_dir: Path, out_dir: Path) -> dict:
     )
     nights_df = nights.summarise_nights(samples, windows)
     sweep_df = battery.sweep(samples, nights_df, CAPACITIES, POWER_KWS)
-    recommended = battery.recommend_capacity(sweep_df, power_kw=3.0)
+    # The elbow of the capacity curve, not a chosen cut-off. The earlier
+    # 50 kWh/yr-per-added-kWh threshold was a judgement call rather than a
+    # derived or researched figure, so it no longer drives the answer or
+    # appears in the report. `battery.recommend_capacity` still implements it
+    # for anyone who has a real cost figure to derive a threshold from.
+    recommended = battery.elbow_capacity(sweep_df, power_kw=3.0)
     sens = nights.ev_sensitivity(samples, windows)
     monthly = _monthly(samples, nights_df, windows, recommended)
 
@@ -154,6 +159,7 @@ def run(data_dir: Path, out_dir: Path) -> dict:
         "median_night_kwh": float(covered["night_wh"].median() / 1000),
         "p90_night_kwh": float(covered["night_wh"].quantile(0.9) / 1000),
         "recommended_kwh": float(recommended),
+        "recommendation_method": "elbow of the non-EV capacity curve",
         "night_self_sufficiency_pct": float(at["nonev_night_self_sufficiency_pct"]),
         "cycles_per_yr": float(at["cycles_per_yr"]),
         "pct_gain_from_3p7kw_inverter": power_gain,

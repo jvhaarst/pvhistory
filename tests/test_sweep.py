@@ -6,6 +6,7 @@ from pvnight.battery import (
     benefit_share_pct,
     build_masks,
     elbow_capacity,
+    elbow_stability,
     net_wh,
     recommend_capacity,
     sweep,
@@ -231,3 +232,27 @@ def test_elbow_and_benefit_share_on_the_real_sweep(real_sweep):
 def real_sweep():
     """The committed sweep, so the threshold-free figures are pinned to data."""
     return pd.read_csv("out/battery_sweep.csv")
+
+
+def test_elbow_stability_reports_its_own_sweep_dependence():
+    """The elbow is not parameter-free: it drifts with where the sweep is
+    truncated, settling only once the top end is flat. The report must be
+    able to show that rather than claim independence it does not have."""
+    s = pd.DataFrame({
+        "capacity_kwh": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+        "power_kw": 3.0,
+        "nonev_night_grid_import_kwh_yr": [100.0, 40.0, 22.0, 16.0, 13.0, 12.0],
+    })
+    out = elbow_stability(s, power_kw=3.0, tops=(2.0, 3.0, 5.0))
+    assert list(out.columns) == ["sweep_top_kwh", "elbow_kwh", "top_end_marginal"]
+    assert len(out) == 3
+    assert out["elbow_kwh"].notna().all()
+
+
+def test_elbow_stability_on_the_real_sweep(real_sweep):
+    """Measured: 6.0 kWh on a 0-10 sweep, settling to 8.0 by 0-25."""
+    out = elbow_stability(real_sweep, power_kw=3.0, tops=(10.0, 20.0, 25.0, 30.0))
+    got = dict(zip(out.sweep_top_kwh, out.elbow_kwh))
+    assert got[10.0] == pytest.approx(6.0)
+    assert got[25.0] == pytest.approx(8.0)
+    assert got[30.0] == pytest.approx(8.0)

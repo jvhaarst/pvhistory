@@ -16,7 +16,11 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from .battery import benefit_share_pct, elbow_capacity  # noqa: E402
+from .battery import (  # noqa: E402
+    benefit_share_pct,
+    elbow_capacity,
+    elbow_stability,
+)
 from .report import COVERAGE_CMAP, FURNITURE, SERIES, STYLE, _svg  # noqa: E402,F401
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -111,15 +115,13 @@ def chart_knee(sweep: pd.DataFrame, recommended_kwh: float) -> str:
     return _svg(fig)
 
 
-def chart_marginal(sweep: pd.DataFrame, recommended_kwh: float,
-                    threshold: float = 50.0, elbow_kwh: float | None = None) -> str:
+def chart_marginal(sweep: pd.DataFrame, elbow_kwh: float) -> str:
     """Marginal kWh/yr avoided per added kWh, both scenarios.
 
-    The recommendation (``recommend_capacity``) is taken from the non-EV
-    curve (``nonev_marginal_kwh_per_kwh``), so that is the series emphasised
-    and the one the knee marker and threshold line are read against. The
+    The recommendation is the elbow of the non-EV curve
+    (``nonev_marginal_kwh_per_kwh``), so that is the series emphasised. The
     all-nights curve (``marginal_kwh_per_kwh``) is plotted alongside for
-    context only.
+    context only. No cut-off line is drawn: this report does not use one.
     """
     fig, ax = plt.subplots(figsize=(9, 4))
     d = sweep[sweep["power_kw"] == 3.0].sort_values("capacity_kwh")
@@ -127,13 +129,8 @@ def chart_marginal(sweep: pd.DataFrame, recommended_kwh: float,
             label="household nights only (used for the recommendation)")
     ax.plot(d.capacity_kwh, d.marginal_kwh_per_kwh, lw=1.5, color=SERIES[1],
             alpha=0.6, label="all nights (context)")
-    ax.axhline(threshold, color=FURNITURE, ls="--", lw=1,
-               label=f"{threshold:.0f} kWh/yr per kWh cut-off")
-    ax.axvline(recommended_kwh, color=FURNITURE, ls=":", lw=1,
-               label=f"{recommended_kwh:.1f} kWh — threshold rule")
-    if elbow_kwh is not None:
-        ax.axvline(elbow_kwh, color=SERIES[2], ls="-.", lw=1.5,
-                   label=f"{elbow_kwh:.1f} kWh — elbow, no threshold")
+    ax.axvline(elbow_kwh, color=SERIES[2], ls="-.", lw=1.5,
+               label=f"{elbow_kwh:.1f} kWh — elbow of the curve")
     ax.set_xlabel("battery capacity (kWh, nameplate)")
     ax.set_ylabel("marginal kWh/yr avoided per added kWh")
     ax.legend(frameon=False, labelcolor=FURNITURE, fontsize=8)
@@ -195,13 +192,13 @@ tr.knee { font-weight: 600; background: color-mix(in srgb, var(--accent) 12%, tr
 """
 
 
-def _marginal_table(sweep: pd.DataFrame, recommended_kwh: float,
+def _marginal_table(sweep: pd.DataFrame, elbow_kwh: float,
                      power_kw: float = 3.0, max_kwh: float = 12.0) -> str:
     """Spec S4.4's promised marginal-return table: capacity against both
     marginal curves and the non-EV night grid import they are computed
-    from, so a reader who prefers a different cut-off than the stated 50
-    kWh/yr can read their own answer straight off this table rather than
-    eyeballing the chart above it. The chosen knee row is marked.
+    from, plus the share of the achievable benefit each size captures, so a
+    reader can locate their own preferred point rather than accepting one.
+    The elbow row is marked.
 
     Capped at ``max_kwh`` — beyond that both curves are flat and a full
     0-30 kWh table would be 61 uninformative rows.
@@ -217,8 +214,8 @@ def _marginal_table(sweep: pd.DataFrame, recommended_kwh: float,
                      "non-EV night grid import (kWh/yr)", ""])
     rows = []
     for r in d.itertuples():
-        cls = ' class="knee"' if np.isclose(r.capacity_kwh, recommended_kwh) else ""
-        note = "recommended" if np.isclose(r.capacity_kwh, recommended_kwh) else ""
+        cls = ' class="knee"' if np.isclose(r.capacity_kwh, elbow_kwh) else ""
+        note = "elbow" if np.isclose(r.capacity_kwh, elbow_kwh) else ""
         rows.append(
             f"<tr{cls}><td>{r.capacity_kwh:.1f}</td>"
             f"<td>{r.benefit_share_pct:.1f}%</td>"
@@ -288,6 +285,7 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
     dataset moves the sentence along with the numbers.
     """
     _elbow = elbow_capacity(sweep_df, power_kw=3.0)
+    elbow_kwh = _elbow
     covered = nights_df[nights_df["covered"]]
     at = sweep_df[(sweep_df.power_kw == 3.0)
                   & np.isclose(sweep_df.capacity_kwh, recommended_kwh)]
@@ -324,42 +322,24 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
         ("Where the marginal kWh stops paying",
          "This curve rises before it falls: a battery this small is "
          "exhausted within minutes of sunset, so its first half-kWh barely "
-         "helps, and marginal return climbs before it ever starts "
-         "declining. That is why the rule can't just take the earliest "
-         "point under the line — that would land on this leading dip, not "
-         "the real knee. "
-         f"So the recommendation of {recommended_kwh:.1f} kWh is the "
-         "smallest capacity beyond which the marginal return never rises "
-         "above 50 kWh/yr per added kWh again — an extra kWh cycling less "
-         "than once a week from there on. <strong>That 50 is a stated "
-         "judgement, not a derived constant</strong>: read your own "
-         "cut-off straight off this table if you prefer a different one. "
-         "The rule is applied to the <strong>household (non-EV) curve</strong>, "
-         "plotted heavier below, with the all-nights curve shown alongside "
-         "for context; the knee marker sits on the non-EV curve. Note also "
-         "that the \"about once a week\" reasoning is about total avoided "
-         "import, while the rule is applied to the non-EV curve specifically "
-         "— which biases the recommendation smaller, i.e. conservatively. "
-         "The all-nights curve would put the same threshold at 8.0 kWh "
-         "instead of the recommended 7.5. A reader comparing \"under once a "
-         "week\" against the reported cycles/yr figure above should keep "
-         "that distinction in mind. "
-         f"<br><br><strong>If you distrust the threshold entirely, the curve "
-         f"answers on its own.</strong> The dash-dotted marker at "
-         f"{_elbow:.1f} kWh is the <em>elbow</em> — the point of greatest "
-         "perpendicular distance from the straight line joining the curve's "
-         "two ends. No judgement enters it, only the geometry. It lands "
-         f"within half a step of the threshold rule\u2019s "
-         f"{recommended_kwh:.1f} kWh, which is the main reason to trust "
-         "either. Note the elbow is <em>not</em> the inflection point: the "
-         "inflection sits at the peak of this curve, around 2.5 kWh, where "
-         "diminishing returns begin rather than end. "
-         "The <strong>share of achievable benefit</strong> column in the "
-         "table is the same idea without any curve-fitting \u2014 what "
-         "fraction of everything an effectively infinite battery could "
-         "deliver each size actually captures.",
-         chart_marginal(sweep_df, recommended_kwh, elbow_kwh=_elbow),
-         _marginal_table(sweep_df, recommended_kwh)),
+         "helps, and marginal return climbs before it ever starts declining. "
+         "The peak, around 2.5 kWh, is the <em>inflection point</em> — where "
+         "diminishing returns begin, not where they end. It is a poor size "
+         "to buy: it is merely the most efficient kWh, not enough of them. "
+         f"<br><br>The marked point at {elbow_kwh:.1f} kWh is the "
+         "<strong>elbow</strong>: the greatest perpendicular distance from "
+         "the straight line joining the curve's two ends. No cut-off is "
+         "chosen and none is drawn on this chart. "
+         "<br><br><strong>The elbow is not assumption-free, and the table "
+         "below shows exactly how far it can be trusted.</strong> It depends "
+         "on where the sweep stops, because the chord is drawn to that "
+         "endpoint. Read the stability table: if the elbow has stopped "
+         "moving by the time the top-end marginal return goes flat, the "
+         "sweep was carried far enough and the answer has settled. If it "
+         "were still drifting at the last row, it would not have.",
+         chart_marginal(sweep_df, _elbow),
+         _marginal_table(sweep_df, _elbow),
+         _elbow_table(sweep_df)),
         ("When the battery actually works",
          "Discharge by month at the recommended capacity. The winter months "
          "are near-idle, which is the same finding as the third chart seen "
@@ -380,7 +360,7 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
     ]
     card_html = "".join(
         f'<section class="card"><h2>{t}</h2><p>{c}</p>'
-        f'<div class="chart">{svg}</div>{rest[0] if rest else ""}</section>'
+        f'<div class="chart">{svg}</div>{"".join(rest)}</section>'
         for t, c, svg, *rest in cards)
 
     ev_note = (
@@ -407,3 +387,25 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
         + "inverter.</p>"
         + f'<div class="stats">{stat_html}</div>'
         + card_html + ev_note + "</main>")
+
+
+def _elbow_table(sweep: pd.DataFrame, power_kw: float = 3.0) -> str:
+    """Evidence that the elbow has settled, rather than a claim that it has.
+
+    The elbow needs no cut-off, but it does depend on where the capacity
+    sweep stops. Showing the drift lets a reader judge that for themselves.
+    """
+    d = elbow_stability(sweep, power_kw=power_kw)
+    head = "".join(f"<th>{h}</th>" for h in
+                    ["sweep carried to (kWh)", "elbow lands at (kWh)",
+                     "marginal return at the top end"])
+    body = "".join(
+        f"<tr><td>{r.sweep_top_kwh:.0f}</td><td>{r.elbow_kwh:.1f}</td>"
+        f"<td>{r.top_end_marginal:.2f}</td></tr>" for r in d.itertuples())
+    return (
+        '<p class="sub">How the elbow moves as the sweep is truncated. Once '
+        "the top-end marginal return is effectively flat, the elbow stops "
+        "moving — that is the signal the sweep went far enough.</p>"
+        f'<div class="chart"><table><thead><tr>{head}</tr></thead>'
+        f"<tbody>{body}</tbody></table></div>"
+    )

@@ -113,15 +113,31 @@ def test_monthly_charts_do_not_trust_row_order(toy):
     assert html.count("<svg") == 8
 
 
-def test_marginal_caption_describes_the_last_crossing_not_the_first(toy):
-    """The curve rises before it falls, so "first capacity below the
-    threshold" is both wrong and degenerate. The page must not say it."""
-    html = build_html(*toy, recommended_kwh=7.5, coverable_pct=48.2,
+def test_page_carries_no_arbitrary_cut_off(toy):
+    """The 50 kWh/yr per added kWh threshold was a judgement call, not a
+    derived or researched figure, so it was removed from the report entirely.
+    The page now rests on the elbow and the share-of-achievable-benefit
+    framing, neither of which requires choosing a number."""
+    html = build_html(*toy, recommended_kwh=8.0, coverable_pct=48.2,
                       negative_surplus_months=[11, 12, 1])
     low = html.lower()
+    assert "50 kwh/yr" not in low
+    assert "cut-off line" not in low
     assert "first capacity" not in low
-    assert "never" in low and "judgement" in low
+    # and the threshold-free readings are what remain
+    assert "elbow" in low
+    assert "share of achievable benefit" in low
+    assert "inflection" in low
 
+
+def test_page_discloses_the_elbow_is_sweep_dependent(toy):
+    """Replacing a visible arbitrary number with a hidden one would be worse.
+    The elbow depends on where the sweep stops, so the page shows the drift."""
+    html = build_html(*toy, recommended_kwh=8.0, coverable_pct=48.2,
+                      negative_surplus_months=[11, 12, 1])
+    low = html.lower()
+    assert "sweep carried to" in low
+    assert "depends on where the sweep stops" in low
 
 def test_marginal_chart_plots_the_series_the_recommendation_uses(toy):
     """chart_marginal once plotted the all-nights curve under a caption
