@@ -1246,7 +1246,7 @@ Include `TABLE_CSS` immediately after `STYLE` in the returned string.
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_night_report.py -v`
-Expected: PASS, 6 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1387,6 +1387,32 @@ def _monthly(samples: pd.DataFrame, nights_df: pd.DataFrame,
     return out.reset_index()
 
 
+def _coverable_fraction(samples: pd.DataFrame, nights_df: pd.DataFrame,
+                        windows: pd.DataFrame) -> float:
+    """Fraction of covered nights whose energy that day's daytime surplus
+    could have supplied, with an infinite battery and no power limit.
+
+    This is the ceiling the winter months impose: no capacity can beat it.
+    Computed rather than quoted, so the report's headline caveat cannot drift
+    away from the data it describes.
+    """
+    s = samples.sort_values("ts_utc").reset_index(drop=True)
+    cum = np.concatenate([[0.0], nights.consumption_increments(s).to_numpy().cumsum()])
+    ts = s["ts_utc"].to_numpy()
+    gen = s.groupby("solar_date")["energy_gen_wh"].max().rename("gen_wh").reset_index()
+    gen["date"] = pd.to_datetime(gen["solar_date"])
+    ws = windows.dropna(subset=["solar_start_utc", "solar_end_utc"])
+    i = np.searchsorted(ts, ws["solar_start_utc"].to_numpy(), "left")
+    j = np.searchsorted(ts, ws["solar_end_utc"].to_numpy(), "right")
+    day = pd.DataFrame({"date": ws["date"].values, "day_cons_wh": cum[j] - cum[i]})
+
+    n = nights_df[nights_df["covered"]].copy()
+    n["date"] = pd.to_datetime(n["date"])
+    m = gen.merge(day, on="date").merge(n[["date", "night_wh"]], on="date")
+    surplus = m["gen_wh"] - m["day_cons_wh"]
+    return float((surplus >= m["night_wh"]).mean())
+
+
 def run(data_dir: Path, out_dir: Path) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1405,8 +1431,18 @@ def run(data_dir: Path, out_dir: Path) -> dict:
 
     nights_df.to_csv(out_dir / "night_summary.csv", index=False)
     sweep_df.to_csv(out_dir / "battery_sweep.csv", index=False)
+    # Derived rather than hardcoded: the winter prose must move with the data.
+    covered_nights = nights_df[nights_df["covered"]]
+    coverable_pct = 100.0 * _coverable_fraction(samples, nights_df, windows)
+    negative_surplus_months = [
+        int(m) for m in monthly.loc[monthly["surplus_kwh"] < 0, "month"]
+    ]
     (out_dir / "night_report.html").write_text(
-        night_report.build_html(nights_df, sweep_df, monthly, sens, recommended)
+        night_report.build_html(
+            nights_df, sweep_df, monthly, sens, recommended,
+            coverable_pct=coverable_pct,
+            negative_surplus_months=negative_surplus_months,
+        )
     )
 
     covered = nights_df[nights_df["covered"]]
@@ -1453,7 +1489,7 @@ Run: `uv run python analyze_night.py`
 Expected: the summary prints; `out/` gains `night_summary.csv`, `battery_sweep.csv`, `night_report.html`.
 
 Run: `uv run pytest -q`
-Expected: PASS, 97 tests (62 phase 1 + 11 + 9 + 6 + 6 + 3).
+Expected: PASS, 101 tests (62 phase 1 + 13 + 9 + 8 + 8 + 3).
 
 - [ ] **Step 6: Update the README**
 
