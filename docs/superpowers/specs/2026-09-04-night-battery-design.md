@@ -45,10 +45,12 @@ the coverage filter, so the covered range starts later than the data does.
 
 3. **Winter production cannot charge a battery at all.** Median daytime surplus
    (generation minus consumption *within* the solar window) is **negative** in
-   November (−2.15), December (−3.50) and January (−3.44 kWh), and about zero
-   in October (−0.01) and February (−0.31). In those months the house does not
-   generate enough to cover even its daytime load, so no battery of any size
-   receives a charge.
+   November (−2.15), December (−3.50) and January (−3.44 kWh), and marginally
+   negative in October (−0.01) and February (−0.31) — **five negative months in
+   total, not three.** October and February are near zero but still on the
+   deficit side, so the report's derived prose correctly names all five. In
+   those months the house does not generate enough to cover even its daytime
+   load, so no battery of any size receives a charge.
 
 4. **Only 48.2% of nights could be fully covered by that day's surplus even
    with an infinite battery.** By month: June 90.6%, July 86.5%, September
