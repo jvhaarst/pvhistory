@@ -333,13 +333,17 @@ def _gap_prose(gaps: pd.DataFrame, excluded_nights: int) -> str:
         " — midwinter, when night consumption is at its annual peak"
         if g["is_winter"] else ""
     )
-    gap_word = "gap" if g["total"] == 1 else "gaps"
+    if g["total"] == 1:
+        where = (f"The record has one gap, in <strong>{g['month_name']}</strong>, "
+                 f"removing most of {g['span']}{season}.")
+    else:
+        verb = "falls" if g["in_worst"] == 1 else "fall"
+        where = (f"The record has {g['total']} gaps; {g['in_worst']} of them "
+                 f"{verb} in <strong>{g['month_name']}</strong>, together "
+                 f"removing most of {g['span']}{season}.")
     return (
         "Nights are dropped, not treated as low-consumption, whenever the "
-        f"meter has a gap inside the night window. The record has "
-        f"{g['total']} {gap_word}; {g['in_worst']} of them fall in "
-        f"<strong>{g['month_name']}</strong>, together removing most of "
-        f"{g['span']}{season}. That removes "
+        f"meter has a gap inside the night window. {where} That removes "
         f"<strong>{excluded_nights}</strong> nights from this analysis "
         f"around {g['month_name']} alone."
     )
