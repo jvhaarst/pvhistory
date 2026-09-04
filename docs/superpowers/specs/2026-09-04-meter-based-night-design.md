@@ -133,27 +133,35 @@ definitions coincide exactly where this analysis needs them to.
 Daytime surplus is **meter export**: energy that demonstrably had nowhere to
 go, which is precisely what a battery could have captured.
 
-### 4.2 The both-flows bound
+### 4.2 The within-interval ordering bounds
 
 13.5% of intervals record both import and export, because a quarter hour is
-long enough to do both.
+long enough to do both. The meter cannot say which came first, and that
+ordering decides how much a battery could have bridged.
 
-- Simulating on `net = export − import` assumes the battery could not have
-  caught both within the interval. This **understates** what it could do.
-- Simulating on the two flows separately assumes it caught both. This
-  **overstates**.
+Two orderings bracket it, and both are simulated:
 
-**"Separately" means separate steps, not arithmetic.** No single signed
-number can express "charge the 0.3 kWh exported *and* discharge the 0.5 kWh
-imported" within one interval — any attempt either makes the gross bound
-worse than the net one, or erases a real discharge need. So the gross signal
-is a **doubled series**: each interval becomes two steps, the export offered
-for charging and the import presented for discharging, each carrying the full
-15-minute power allowance. A real battery could not quite manage both at full
-power; that deliberate optimism is what makes it an upper bound.
+- **charge-first** — each interval becomes `+export` then `−import`. The
+  battery stores the exported energy and spends it on the import moments
+  later. Maximum bridging; the **favourable** bound.
+- **discharge-first** — `−import` then `+export`. The import arrives before
+  the export is available, so only previously-stored energy can serve it.
+  Minimum bridging; the **unfavourable** bound.
 
-Both are run and the pair is reported as a range. Neither is presented as the
-answer, and no midpoint is invented.
+Each step carries the full 15-minute power allowance, which is mildly
+optimistic for both.
+
+**A rejected earlier formulation, recorded because it is the obvious one.**
+Collapsing each interval to `net = export − import` and simulating that
+single signed series looks simpler and is wrong: at zero capacity it reports
+2,344 Wh of grid import on a toy series where the meter measured 20,307 Wh.
+It understates the baseline by pretending within-interval flows cancel, which
+is not what happened — the house really did import that energy. Both
+orderings above reproduce the measured figure exactly at zero capacity, which
+is the property that makes them comparable to each other and to reality.
+
+Neither ordering is presented as the answer; the pair is the range, and no
+midpoint is invented.
 
 ### 4.3 Parameters
 

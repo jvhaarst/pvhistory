@@ -19,7 +19,7 @@
 - **Meter facts, all measured** (spec §2.3): 15-minute intervals; every column reads as a **string**, including the timestamp; **decimal comma**; the paired tariff columns are null when the other tariff is active, so fill zero and sum the pair; timestamps label the interval **end**; 233,358 rows spanning 2019-12-31 23:15 UTC → 2026-09-03 22:00 UTC; **686 missing intervals in seven gaps**, four of them in January 2024.
 - **Night consumption is meter import** over the night window. Generation is zero at night, so import *is* household consumption.
 - **Daytime surplus is meter export.**
-- **Both bounds are run**, never one: `net` (export − import per interval) understates what a battery could do; `gross` (both flows separately) overstates. Report the range, invent no midpoint.
+- **Both bounds are run**, never one. Each interval is split into two steps: `charge_first` is `+export` then `−import` (maximum bridging, favourable); `discharge_first` is `−import` then `+export` (minimum bridging, unfavourable). Both reproduce the measured grid import exactly at zero capacity. Report the range, invent no midpoint.
 - **No cut-off is introduced.** Phase 2 removed its 50 kWh/yr threshold as a judgement call; the elbow, benefit-share, convergence and elbow-stability readings carry over.
 - Battery parameters unchanged from phase 2: round trip 0.90 split as `sqrt(0.90)` each way, usable fraction 0.90, power caps 2.5 / 3.0 / 3.7 kW, capacities 0–30 kWh in 0.5 kWh steps.
 - Never assert an exact datetime resolution (pandas 3.x gives microseconds).
@@ -545,7 +545,7 @@ step as regression tests: the fault is a fact about the data."
 - Produces:
   - `battery.simulate(net_wh, night_mask, nonev_mask, month_idx, spec, dt_hours=DT_HOURS)` — additive keyword.
   - `meter_battery.bound_signals(meter_df) -> tuple[np.ndarray, np.ndarray]` — `(net_wh, gross_wh)`; `net` is `(export − import) * 1000`, `gross` is the same but with import and export treated as separable within the interval.
-  - `meter_battery.sweep_bounds(meter_df, nights_df, capacities_kwh, power_kws=(2.5, 3.0, 3.7)) -> pd.DataFrame` — phase 2's sweep columns plus a `bound` column of `"net"` or `"gross"`.
+  - `meter_battery.sweep_bounds(meter_df, nights_df, capacities_kwh, power_kws=(2.5, 3.0, 3.7)) -> pd.DataFrame` — phase 2's sweep columns plus a `bound` column of `"charge_first"` or `"discharge_first"`.
 
 **On the two bounds.** A 15-minute interval can contain both import and export (13.5% do). The `net` signal collapses them, so a battery never sees the export it could have stored — an understatement. The `gross` signal presents the export for charging and the import for discharging in the same interval, which a real battery could partly do — an overstatement. The truth is between; both are run and neither is called the answer.
 
