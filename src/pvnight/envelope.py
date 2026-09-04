@@ -236,8 +236,10 @@ def build_windows(
 
         # A 25-hour local day is a fall-back day: the local clock repeats
         # an hour, and PVOutput stored only 288 slots for it, so one hour
-        # of data is absent.
-        grid_len = len(solar.day_grid_utc(d))
+        # of data is absent. Recorded here per-date; converted to the
+        # dst_hour_missing flag below, which describes the row's NIGHT
+        # rather than the row's own day.
+        grid_minutes = len(solar.day_grid_utc(d))
 
         rows.append(
             {
@@ -252,7 +254,7 @@ def build_windows(
                 "theta_end_deg": theta_end,
                 "n_samples": min(n_start, n_end),
                 "n_years": min(years_start, years_end),
-                "dst_hour_missing": grid_len == 1500,
+                "grid_minutes": grid_minutes,
                 "extrapolated": d not in observed_dates,
                 # Spec section 8: not expected at this latitude, but flagged
                 # rather than assumed away.
@@ -261,6 +263,16 @@ def build_windows(
         )
 
     w = pd.DataFrame(rows)
+    # dst_hour_missing describes the row's NIGHT (solar_end(D) ->
+    # solar_start(D+1)), not the row's own day: the fall-back clock change
+    # happens on day D+1, so it's day D+1's grid length that determines
+    # whether row D's night is missing an hour of samples. Inserted at the
+    # position grid_minutes held, to keep the emitted column order and
+    # schema unchanged.
+    grid_minutes_pos = w.columns.get_loc("grid_minutes")
+    dst_hour_missing = (w["grid_minutes"].shift(-1) > 1440).fillna(False)
+    w = w.drop(columns=["grid_minutes"])
+    w.insert(grid_minutes_pos, "dst_hour_missing", dst_hour_missing)
     w["start_offset_min"] = (
         w["solar_start_utc"] - w["sunrise_utc"]
     ).dt.total_seconds() / 60

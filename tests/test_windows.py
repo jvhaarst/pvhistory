@@ -78,13 +78,19 @@ def test_night_duration_is_immune_to_dst_transitions(pipeline):
     assert naive_h == pytest.approx(row["night_duration_h"] + 1.0, abs=0.05)
 
 
-def test_dst_hour_missing_flags_exactly_the_fall_back_dates(pipeline):
+def test_dst_hour_missing_flags_the_night_that_contains_the_lost_hour(pipeline):
+    """The clock goes back early on the fall-back morning, so the hour
+    PVOutput never stored falls in the night belonging to the PREVIOUS row:
+    row D's night runs solar_end(D) -> solar_start(D+1). Measured: the
+    2023-10-28 night carries a 65-minute sample gap, while the 2023-10-29
+    night is a normal 5 minutes."""
     _, _, w = pipeline
     flagged = set(w.loc[w["dst_hour_missing"], "date"])
-    assert dt.date(2023, 10, 29) in flagged
-    assert dt.date(2024, 10, 27) in flagged
+    assert dt.date(2023, 10, 28) in flagged
+    assert dt.date(2024, 10, 26) in flagged
+    assert dt.date(2023, 10, 29) not in flagged
     assert dt.date(2023, 3, 26) not in flagged
-    assert len(flagged) == 7  # one per year, 2020-2026
+    assert len(flagged) == 7
 
 
 def test_extrapolated_marks_dates_with_no_observation(pipeline):
@@ -120,6 +126,21 @@ def test_window_contains_both_ends_on_88_percent_of_days(pipeline):
     m = w.merge(ev, left_on="date", right_on="solar_date")
     both = (m["first_light_utc"] >= m["solar_start_utc"]) & (m["last_light_utc"] <= m["solar_end_utc"])
     assert both.mean() >= 0.88
+
+
+def test_containment_holds_in_every_individual_year(pipeline):
+    """The aggregate figure averages over a hardware regime change at 2024.
+    Measured per-year first-light containment ranges 0.904 to 0.997 and
+    last-light 0.867 to 0.984, so 0.85 is a floor with margin that would
+    still fail loudly if one year's fit went wrong."""
+    _, ev, w = pipeline
+    m = w.merge(ev, left_on="date", right_on="solar_date")
+    m["yr"] = pd.to_datetime(m["date"]).dt.year
+    for year, grp in m.groupby("yr"):
+        first = (grp["first_light_utc"] >= grp["solar_start_utc"]).mean()
+        last = (grp["last_light_utc"] <= grp["solar_end_utc"]).mean()
+        assert first >= 0.85, f"{year} first light containment {first:.3f}"
+        assert last >= 0.85, f"{year} last light containment {last:.3f}"
 
 
 def test_days_outside_the_window_miss_it_only_narrowly(pipeline):
