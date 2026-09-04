@@ -12,7 +12,7 @@ consumption is unambiguously household draw, not solar shortfall.
 uv run python analyze.py
 ```
 
-This loads the PVOutput history parquet files in the repository root, fits the
+This loads the PVOutput history parquet files from `data/pvoutput/`, fits the
 seasonal elevation-threshold envelope, and writes three files to `out/`:
 `solar_thresholds.csv`, `solar_windows.csv`, and `report.html`. Run
 `uv run pytest` to run the test suite.

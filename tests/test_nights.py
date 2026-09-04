@@ -123,9 +123,9 @@ def test_a_mid_day_energy_gap_is_not_silently_zeroed():
 
 
 @pytest.fixture(scope="session")
-def real_nights(loaded):
+def real_nights(loaded, repo_root):
     w = pd.read_csv(
-        "out/solar_windows.csv",
+        repo_root / "out" / "solar_windows.csv",
         parse_dates=["date", "night_start_utc", "night_end_utc"],
     )
     return summarise_nights(loaded, w)
@@ -190,9 +190,9 @@ def test_both_ev_charging_modes_are_caught(real_nights):
     assert c.loc[pd.Timestamp("2022-11-13"), "peak_w"] < 5000
 
 
-def test_ev_sensitivity_grid_has_a_row_per_combination(loaded):
+def test_ev_sensitivity_grid_has_a_row_per_combination(loaded, repo_root):
     w = pd.read_csv(
-        "out/solar_windows.csv",
+        repo_root / "out" / "solar_windows.csv",
         parse_dates=["date", "night_start_utc", "night_end_utc"],
     )
     g = ev_sensitivity(loaded, w)

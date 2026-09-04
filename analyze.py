@@ -10,6 +10,7 @@ import pandas as pd
 from pvnight import envelope as env
 from pvnight import report
 from pvnight.events import first_last_light
+from pvnight.config import DATA_SUBDIR
 from pvnight.loader import load
 
 START_DATE = dt.date(2020, 1, 1)
@@ -44,6 +45,7 @@ def run(data_dir: Path, out_dir: Path) -> dict:
 
 
 if __name__ == "__main__":
-    summary = run(Path(__file__).parent, Path(__file__).parent / "out")
+    here = Path(__file__).parent
+    summary = run(here / DATA_SUBDIR, here / "out")
     for key, value in summary.items():
         print(f"{key}: {value}")

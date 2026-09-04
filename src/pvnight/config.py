@@ -4,6 +4,9 @@ LATITUDE = 51.98
 LONGITUDE = 5.80
 SITE_TZ = "Europe/Amsterdam"
 
+# Input data lives in its own folder, named by provenance so a second
+# source can sit beside it without ambiguity.
+DATA_SUBDIR = "data/pvoutput"
 DATA_GLOB = "pvoutput_gethistory.*.parquet.xz"
 
 # Geometric elevation of the sun at SPA sunrise/sunset, in degrees.

@@ -316,6 +316,18 @@ Test-driven. The load-bearing tests:
   battery loses capacity over its life, so the recommended size is a
   beginning-of-life figure.
 
+## 8a. Layout note (added after implementation)
+
+The PVOutput exports live in `data/pvoutput/`, named by provenance so a
+second source can sit beside them. `pvnight.config.DATA_SUBDIR` holds that
+path; `loader.load(data_dir)` takes the folder containing the exports.
+
+`analyze_night.run` resolves the phase-1 window table independently of
+`data_dir`, via an explicit `windows_csv` argument. It previously derived it
+as `data_dir / "out" / "solar_windows.csv"`, which coupled an *output* to the
+*input* location and would have pointed at `data/pvoutput/out/` once the
+exports moved.
+
 ## 9. Out of scope
 
 Deliberately excluded, each a separate question:

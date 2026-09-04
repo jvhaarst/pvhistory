@@ -6,7 +6,7 @@ import pytest
 from analyze_night import run
 
 
-def test_run_writes_all_three_outputs(tmp_path, data_dir):
+def test_run_writes_all_three_outputs(tmp_path, data_dir, repo_root):
     s = run(data_dir, tmp_path)
 
     summary = pd.read_csv(tmp_path / "night_summary.csv")
@@ -33,7 +33,7 @@ def test_run_writes_all_three_outputs(tmp_path, data_dir):
     assert 150 < s["cycles_per_yr"] < 200
 
 
-def test_monthly_surpluses_are_finite(tmp_path, data_dir):
+def test_monthly_surpluses_are_finite(tmp_path, data_dir, repo_root):
     """A NaN-poisoned prefix sum made every surplus NaN, which silently
     flipped the report's headline finding to its opposite. Pin it."""
     from pvnight.loader import load
@@ -42,7 +42,7 @@ def test_monthly_surpluses_are_finite(tmp_path, data_dir):
 
     samples = load(data_dir)
     windows = pd.read_csv(
-        Path(data_dir) / "out" / "solar_windows.csv",
+        repo_root / "out" / "solar_windows.csv",
         parse_dates=["date", "solar_start_utc", "solar_end_utc",
                      "night_start_utc", "night_end_utc"],
     )
@@ -55,7 +55,7 @@ def test_monthly_surpluses_are_finite(tmp_path, data_dir):
     assert set(winter) >= {11, 12, 1}, f"expected a winter deficit, got {winter}"
 
 
-def test_coverable_fraction_matches_the_measured_ceiling(tmp_path, data_dir):
+def test_coverable_fraction_matches_the_measured_ceiling(tmp_path, data_dir, repo_root):
     """Spec fact 4: about 48% of nights are coverable even with infinite
     storage. A broken prefix sum returned a plausible-looking 0.0."""
     from pvnight.loader import load
@@ -64,7 +64,7 @@ def test_coverable_fraction_matches_the_measured_ceiling(tmp_path, data_dir):
 
     samples = load(data_dir)
     windows = pd.read_csv(
-        Path(data_dir) / "out" / "solar_windows.csv",
+        repo_root / "out" / "solar_windows.csv",
         parse_dates=["date", "solar_start_utc", "solar_end_utc",
                      "night_start_utc", "night_end_utc"],
     )
@@ -72,7 +72,7 @@ def test_coverable_fraction_matches_the_measured_ceiling(tmp_path, data_dir):
     assert 0.40 < A._coverable_fraction(samples, nights_df, windows) < 0.55
 
 
-def test_power_cap_sensitivity_is_measured_not_assumed(tmp_path, data_dir):
+def test_power_cap_sensitivity_is_measured_not_assumed(tmp_path, data_dir, repo_root):
     """Spec fact 9 says the 3 kW charge cap is *expected* not to bind, and
     that the simulation must confirm it rather than the spec asserting it.
     This pins that the figure is actually computed and is a sane percentage;
@@ -96,7 +96,7 @@ def test_power_cap_sensitivity_is_measured_not_assumed(tmp_path, data_dir):
     assert -10.0 <= gain < 100.0
 
 
-def test_summary_csv_carries_the_ev_flag_and_coverage(tmp_path, data_dir):
+def test_summary_csv_carries_the_ev_flag_and_coverage(tmp_path, data_dir, repo_root):
     run(data_dir, tmp_path)
     d = pd.read_csv(tmp_path / "night_summary.csv")
     for col in ["date", "night_wh", "peak_w", "hours_above_2kw", "is_ev", "coverage"]:

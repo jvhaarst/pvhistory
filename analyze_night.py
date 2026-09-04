@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from pvnight import battery, night_report, nights
+from pvnight.config import DATA_SUBDIR
 from pvnight.loader import load
 
 CAPACITIES = np.arange(0.0, 30.01, 0.5)
@@ -101,13 +102,19 @@ def _coverable_fraction(samples: pd.DataFrame, nights_df: pd.DataFrame,
     return float((surplus >= m["night_wh"]).mean())
 
 
-def run(data_dir: Path, out_dir: Path) -> dict:
+def run(data_dir: Path, out_dir: Path, windows_csv: Path | None = None) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     samples = load(Path(data_dir))
+    # The window table is a phase-1 OUTPUT, not an input, so it is resolved
+    # independently of where the raw exports live. Deriving it from data_dir
+    # coupled the two, and would have silently pointed at data/pvoutput/out/
+    # once the exports moved into their own folder.
+    if windows_csv is None:
+        windows_csv = Path(__file__).parent / "out" / "solar_windows.csv"
     windows = pd.read_csv(
-        Path(data_dir) / "out" / "solar_windows.csv",
+        windows_csv,
         parse_dates=["date", "solar_start_utc", "solar_end_utc",
                      "night_start_utc", "night_end_utc"],
     )
@@ -170,5 +177,5 @@ def run(data_dir: Path, out_dir: Path) -> dict:
 
 if __name__ == "__main__":
     here = Path(__file__).parent
-    for k, v in run(here, here / "out").items():
+    for k, v in run(here / DATA_SUBDIR, here / "out").items():
         print(f"{k}: {v}")

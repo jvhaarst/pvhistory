@@ -22,7 +22,7 @@ separate, later piece of work (§11).
 
 **Site:** 51.98° N, 5.80° E, timezone `Europe/Amsterdam`.
 
-**Input:** six PVOutput history exports in the repository root,
+**Input:** six PVOutput history exports in `data/pvoutput/`,
 `pvoutput_gethistory.YYYY.parquet.xz` for 2020–2025. Despite the `.xz`
 suffix these are plain Apache Parquet files with internal compression; they
 are read directly by `pandas.read_parquet` and must *not* be passed through
