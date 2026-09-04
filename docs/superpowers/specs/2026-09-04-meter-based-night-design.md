@@ -61,9 +61,32 @@ declines year on year, which fits a lost phase whose share of load is
   `levering_normaal` / `levering_laag` (import, two tariffs, kWh),
   `teruglevering_normaal` / `teruglevering_laag` (export), and
   `buitentemperatuur` (unused; carries `-` for missing).
-- **Decimal comma**, so every numeric column needs explicit parsing.
-- 233,358 rows against 234,044 the span implies: **686 missing (0.3%)**, in
-  three gaps — one of 2.5 h, one of 1.5 h, and one of **5 days 9.75 h**.
+- **Every column reads as a string**, including the timestamp and all four
+  energy columns (`'0,04'`), so each needs explicit parsing. Decimal comma.
+- The two tariff columns of each pair are **null when the other tariff is
+  active** — in 2020, `levering_normaal` has 18,752 nulls and `levering_laag`
+  16,384, summing to exactly the 35,136 rows. So null means "not this tariff",
+  and filling with zero before summing the pair is correct, not a fudge.
+  Export rows can have *both* null, meaning no export that interval.
+- Timestamps label the interval **end**: the first row of 2020 is
+  `01-01-2020 00:15:00 +0100`.
+- 233,358 rows against 234,044 the span implies **686 missing (0.3%)**, in
+  **seven** gaps — and they are not evenly spread:
+
+  | gap start (UTC) | duration |
+  |---|---|
+  | 2022-02-15 12:15 | 2 h 30 m |
+  | 2023-07-21 06:15 | 1 h 30 m |
+  | **2024-01-08 23:00** | **5 d 9 h 45 m** |
+  | 2024-01-14 23:00 | 10 h 15 m |
+  | 2024-01-15 23:00 | 24 h 15 m |
+  | 2024-01-18 23:00 | 2 h 15 m |
+  | 2024-07-19 07:45 | 2 h 45 m |
+
+  Five of the seven fall in **January 2024**, together removing most of
+  8–19 January — midwinter, when night consumption is at its annual peak. Any
+  2024 figure must exclude affected nights rather than treat them as low
+  ones, and the report must say how many nights that removes.
 - **31,528 intervals (13.5%) carry both import and export.** §4.2 turns this
   into a bound rather than an assumption.
 - At 15-minute resolution, **16% of night energy is drawn above 3 kW**,
@@ -213,8 +236,10 @@ Test-driven. The load-bearing tests:
    means something upstream changed.
 3. **The December 2022 step.** November 2022 ≥ 0.95 and December 2022 ≤ 0.85.
 4. **Meter parsing.** Decimal comma yields floats, not strings; `+0100` and
-   `+0200` rows both land at the right UTC instant; the three gaps are
-   detected and counted rather than silently interpolated.
+   `+0200` rows both land at the right UTC instant; the seven gaps are
+   detected and counted rather than silently interpolated; and a night
+   overlapping the January 2024 outage is excluded rather than counted as a
+   low-consumption night.
 5. **Both bounds ordered.** For every capacity, the gross bound's grid import
    is less than or equal to the net bound's. A violation means the bounds are
    swapped or the dispatch is wrong.
