@@ -88,3 +88,25 @@ def test_page_discloses_the_january_2024_exclusions(toy):
 def test_page_calls_the_ev_rule_a_heuristic(toy):
     low = build_html(*toy, resolution_penalty_pct=4.2, excluded_nights=12).lower()
     assert "heuristic" in low
+
+
+def test_gap_prose_follows_the_data_not_a_hardcoded_string(toy):
+    """The report's factual claims must move with the frame they describe."""
+    mn, pn, ms, ps, sens, mr, gaps = toy
+    two = pd.DataFrame({
+        "gap_start_utc": pd.to_datetime(["2025-03-04T01:00Z", "2025-03-09T02:00Z"]),
+        "gap_end_utc": pd.to_datetime(["2025-03-04T04:00Z", "2025-03-09T05:00Z"]),
+        "missing_intervals": [12, 12]})
+    html = build_html(mn, pn, ms, ps, sens, mr, two,
+                      resolution_penalty_pct=4.2, excluded_nights=3)
+    assert "March 2025" in html
+    assert "seven gaps" not in html.lower()
+    assert "january 2024" not in html.lower()
+
+
+def test_build_html_survives_an_empty_nights_frame(toy):
+    mn, pn, ms, ps, sens, mr, gaps = toy
+    empty = mn.iloc[0:0]
+    html = build_html(empty, pn, ms, ps, sens, mr, gaps,
+                      resolution_penalty_pct=4.2, excluded_nights=0)
+    assert html.count("<svg") == 6

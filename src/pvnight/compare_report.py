@@ -95,7 +95,8 @@ def chart_night_distribution(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame
 
     ax.set_xlabel("night consumption (kWh)")
     ax.set_ylabel("percentile")
-    ax.legend(frameon=False, labelcolor=FURNITURE, fontsize=8)
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend(frameon=False, labelcolor=FURNITURE, fontsize=8)
     return _svg(fig)
 
 
@@ -164,24 +165,44 @@ def chart_comparison(meter_sweep: pd.DataFrame, pv_sweep: pd.DataFrame,
     return _svg(fig)
 
 
-def chart_coverage(gaps: pd.DataFrame, meter_nights: pd.DataFrame) -> str:
-    """Nights excluded per month, so the January 2024 outage is visible.
+def _gap_months(gaps: pd.DataFrame) -> set:
+    """Every calendar month touched by a meter gap, start through end.
 
-    ``gaps`` is accepted for interface symmetry with the exclusion story it
-    explains, but the count itself comes straight from ``meter_nights``'
-    own ``covered`` flag, which already reflects every gap.
+    A gap that straddles a month boundary marks both months, so a bar
+    highlighted here always corresponds to an actual row in ``gaps`` rather
+    than to a hardcoded date.
+    """
+    months = set()
+    starts = pd.to_datetime(gaps["gap_start_utc"]).dt.tz_localize(None)
+    ends = pd.to_datetime(gaps["gap_end_utc"]).dt.tz_localize(None)
+    for s, e in zip(starts, ends):
+        months.update(pd.period_range(s.to_period("M"), e.to_period("M"), freq="M"))
+    return months
+
+
+def chart_coverage(gaps: pd.DataFrame, meter_nights: pd.DataFrame) -> str:
+    """Nights excluded per month, so a concentrated outage is visible rather
+    than silently averaged away.
+
+    Months containing a meter gap (read from ``gaps``, not asserted) are
+    drawn in the second series colour, so the chart shows *why* the
+    exclusions cluster where they do rather than only that they do.
+    Survives an empty ``meter_nights`` frame by drawing empty, labelled axes
+    instead of raising.
     """
     fig, ax = plt.subplots(figsize=(9, 3.2))
     mn = meter_nights.copy()
-    mn["date"] = pd.to_datetime(mn["date"])
-    mn["ym"] = mn["date"].dt.to_period("M")
-    excluded = (~mn["covered"]).astype(int).groupby(mn["ym"]).sum()
-    idx = pd.period_range(mn["ym"].min(), mn["ym"].max(), freq="M")
-    excluded = excluded.reindex(idx, fill_value=0)
-    x = idx.to_timestamp()
-    jan_2024 = pd.Period("2024-01", freq="M")
-    colours = [SERIES[1] if p == jan_2024 else SERIES[0] for p in idx]
-    ax.bar(x, excluded.to_numpy(), width=20, color=colours)
+    if len(mn):
+        mn["date"] = pd.to_datetime(mn["date"])
+        mn["ym"] = mn["date"].dt.to_period("M")
+        excluded = (~mn["covered"]).astype(int).groupby(mn["ym"]).sum()
+        idx = pd.period_range(mn["ym"].min(), mn["ym"].max(), freq="M")
+        excluded = excluded.reindex(idx, fill_value=0)
+
+        gap_months = _gap_months(gaps) if len(gaps) else set()
+        x = idx.to_timestamp()
+        colours = [SERIES[1] if p in gap_months else SERIES[0] for p in idx]
+        ax.bar(x, excluded.to_numpy(), width=20, color=colours)
     ax.set_xlabel("month")
     ax.set_ylabel("nights excluded")
     return _svg(fig)
@@ -261,6 +282,69 @@ def _elbow_stability_table(charge_first_sweep: pd.DataFrame, power_kw: float = 3
     )
 
 
+def _gap_summary(gaps: pd.DataFrame) -> dict | None:
+    """The facts behind the outage sentence and the stat tile, read once
+    from ``gaps`` so the two never drift apart. ``None`` when there are no
+    gaps to summarise.
+
+    Timestamps are stripped of timezone before conversion to a monthly
+    period: the period itself has no offset, and converting a tz-aware
+    series straight to ``Period`` only raises a UserWarning for no benefit.
+    """
+    if gaps.empty:
+        return None
+    starts = pd.to_datetime(gaps["gap_start_utc"]).dt.tz_localize(None)
+    ends = pd.to_datetime(gaps["gap_end_utc"]).dt.tz_localize(None)
+    by_month = starts.dt.to_period("M").value_counts()
+    worst_month = by_month.idxmax()
+    in_worst = int(by_month.max())
+    in_this_month = starts.dt.to_period("M") == worst_month
+    lo = starts[in_this_month].min()
+    hi = ends[in_this_month].max()
+    if lo.month == hi.month:
+        span = f"{lo:%-d}–{hi:%-d} {lo:%B}"
+    else:
+        span = f"{lo:%-d %B}–{hi:%-d %B}"
+    return {
+        "total": len(gaps),
+        "worst_month": worst_month,
+        "month_name": worst_month.strftime("%B %Y"),
+        "in_worst": in_worst,
+        "span": span,
+        "is_winter": worst_month.month in (11, 12, 1, 2),
+    }
+
+
+def _gap_prose(gaps: pd.DataFrame, excluded_nights: int) -> str:
+    """The outage sentence, computed from ``gaps`` rather than asserted.
+
+    An earlier draft stated the gap count and the January window as literal
+    text, so it could (and did) disagree with whatever ``gaps`` frame was
+    actually passed in. Every number here is read from the frame instead.
+    """
+    g = _gap_summary(gaps)
+    if g is None:
+        return (
+            "Nights are dropped, not treated as low-consumption, whenever "
+            "the meter has a gap inside the night window. This record has "
+            "no gaps, so no nights are excluded for missing intervals."
+        )
+    season = (
+        " — midwinter, when night consumption is at its annual peak"
+        if g["is_winter"] else ""
+    )
+    gap_word = "gap" if g["total"] == 1 else "gaps"
+    return (
+        "Nights are dropped, not treated as low-consumption, whenever the "
+        f"meter has a gap inside the night window. The record has "
+        f"{g['total']} {gap_word}; {g['in_worst']} of them fall in "
+        f"<strong>{g['month_name']}</strong>, together removing most of "
+        f"{g['span']}{season}. That removes "
+        f"<strong>{excluded_nights}</strong> nights from this analysis "
+        f"around {g['month_name']} alone."
+    )
+
+
 def _sensitivity_table(sensitivity: pd.DataFrame) -> str:
     head = "".join(f"<th>{h}</th>" for h in
                     ["power (kW)", "hours", "EV nights", "median EV kWh",
@@ -302,6 +386,12 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
     covered_meter = meter_nights[meter_nights["covered"]]
     ev_share = (100.0 * covered_meter["is_ev"].sum() / len(covered_meter)
                 if len(covered_meter) else float("nan"))
+    gap_summary = _gap_summary(gaps)
+    excluded_label = (
+        f"nights excluded around the {gap_summary['month_name']} outage"
+        if gap_summary is not None
+        else "nights excluded for missing meter intervals"
+    )
 
     stats = [
         (f"{lo:.1f}–{hi:.1f} kWh",
@@ -312,7 +402,7 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
         (f"{ev_share:.0f}%", "of covered nights are EV-charging"),
         (f"{resolution_penalty_pct:.1f}%",
          "resolution penalty, 15-minute vs finer simulation"),
-        (f"{excluded_nights}", "nights excluded around the January 2024 outage"),
+        (f"{excluded_nights}", excluded_label),
     ]
     stat_html = "".join(
         f'<div class="stat"><b>{v}</b><span>{k}</span></div>' for v, k in stats)
@@ -364,13 +454,7 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
          "night load and, with it, the capacity worth buying.",
          chart_comparison(meter_sweep, pv_sweep)),
         ("Nights excluded from the analysis",
-         "Nights are dropped, not treated as low-consumption, whenever the "
-         "meter has a gap inside the night window. Four of the meter's "
-         "seven gaps fall in <strong>January 2024</strong>, together "
-         f"removing most of 8–19 January — midwinter, when night "
-         f"consumption is at its annual peak. That removes "
-         f"<strong>{excluded_nights}</strong> nights from this analysis "
-         "around January 2024 alone.",
+         _gap_prose(gaps, excluded_nights),
          chart_coverage(gaps, meter_nights)),
     ]
     card_html = "".join(
