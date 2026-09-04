@@ -1489,7 +1489,7 @@ Run: `uv run python analyze_night.py`
 Expected: the summary prints; `out/` gains `night_summary.csv`, `battery_sweep.csv`, `night_report.html`.
 
 Run: `uv run pytest -q`
-Expected: PASS, 101 tests (62 phase 1 + 13 + 9 + 8 + 8 + 3).
+Expected: PASS, 103 tests (62 phase 1 + 13 + 9 + 8 + 8 + 3).
 
 - [ ] **Step 6: Update the README**
 
