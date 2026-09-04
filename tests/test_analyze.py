@@ -12,7 +12,13 @@ def test_run_writes_all_three_outputs(tmp_path, data_dir):
     assert len(windows) == len(pd.date_range("2020-01-01", "2026-12-31"))
     assert (tmp_path / "report.html").read_text().count("<svg") == 5
 
+    assert set(summary.keys()) == {
+        "n_days_observed", "n_windows", "median_start_offset_min",
+        "shortest_night_h", "longest_night_h",
+    }
     assert summary["n_days_observed"] == 2047
+    assert summary["n_windows"] == len(windows)
+    assert isinstance(summary["median_start_offset_min"], float)
     assert 0 < summary["shortest_night_h"] < summary["longest_night_h"] < 24
 
 

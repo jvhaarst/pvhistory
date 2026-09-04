@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 .worktrees/
 *.py[cod]
+out/report.html

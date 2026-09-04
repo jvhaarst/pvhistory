@@ -59,8 +59,6 @@ def test_consumption_nulls_are_preserved(loaded):
 def test_energy_rise_detects_first_light_when_power_still_reads_zero(loaded):
     """Regression: on 2025-05-13 the counter reaches 1 Wh at 03:50 UTC while
     both power columns still read 0.0. The energy limb must catch it."""
-    import datetime as dt
-
     day = loaded[loaded["solar_date"] == dt.date(2025, 5, 13)]
     first = day.loc[day["generating"], "ts_utc"].min()
     assert first == pd.Timestamp("2025-05-13T03:50:00", tz="UTC")
