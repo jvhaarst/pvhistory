@@ -248,12 +248,20 @@ def chart_coverage(loaded: pd.DataFrame) -> str:
     cmap = COVERAGE_CMAP.with_extremes(bad="#d95926")
     masked = np.ma.masked_equal(grid.to_numpy(), 0)
 
+    # Vector cell edges: pcolormesh (unlike imshow) draws each cell as a
+    # path rather than rasterising the grid into an embedded PNG, so the
+    # saved SVG stays free of <image>/data:image payloads (see report.html
+    # publish rejection). One row per year, one column per day-of-year.
+    years = grid.index.to_numpy()
+    y_edges = np.concatenate([years - 0.5, [years[-1] + 0.5]])
+    x_edges = np.arange(0.5, 366.5 + 0.5, 1.0)
+
     fig, ax = plt.subplots(figsize=(9, 2.8))
-    im = ax.imshow(
-        masked, aspect="auto", origin="lower", cmap=cmap,
-        interpolation="nearest",
-        extent=[1, 366, grid.index.min() - 0.5, grid.index.max() + 0.5],
+    im = ax.pcolormesh(
+        x_edges, y_edges, masked, cmap=cmap, shading="flat",
     )
+    ax.set_xlim(1, 366)
+    ax.set_ylim(years.min() - 0.5, years.max() + 0.5)
     ax.set_yticks(list(grid.index))
     ax.set_yticklabels([str(y) for y in grid.index])
     ax.set_xlabel("day of year")
@@ -261,6 +269,7 @@ def chart_coverage(loaded: pd.DataFrame) -> str:
     cbar.set_label("generating samples per day", color=FURNITURE)
     cbar.ax.tick_params(colors=FURNITURE)
     cbar.outline.set_edgecolor(FURNITURE)
+    cbar.solids.set_rasterized(False)
     return _svg(fig)
 
 
