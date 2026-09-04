@@ -28,8 +28,9 @@ and a report.
 ### 2.1 Established facts
 
 Measured during design against the real data, not assumed. Percentages are of
-the 2,031 nights with better than 95% sample coverage, spanning 2020-05-20 to
-2025-12-30.
+the 2,031 nights with better than 95% sample coverage, spanning 2020-05-24 to
+2025-12-30. Raw samples begin on 2020-05-20, but the first four nights fail
+the coverage filter, so the covered range starts later than the data does.
 
 1. **Night consumption is heavily right-skewed.** Median 4.85 kWh, p90 10.52,
    p99 29.66, max 44.53. The mean (6.04) exceeds the median by 25%, so every
@@ -44,10 +45,12 @@ the 2,031 nights with better than 95% sample coverage, spanning 2020-05-20 to
 
 3. **Winter production cannot charge a battery at all.** Median daytime surplus
    (generation minus consumption *within* the solar window) is **negative** in
-   November (−2.15), December (−3.50) and January (−3.44 kWh), and about zero
-   in October (−0.01) and February (−0.31). In those months the house does not
-   generate enough to cover even its daytime load, so no battery of any size
-   receives a charge.
+   November (−2.15), December (−3.50) and January (−3.44 kWh), and marginally
+   negative in October (−0.01) and February (−0.31) — **five negative months in
+   total, not three.** October and February are near zero but still on the
+   deficit side, so the report's derived prose correctly names all five. In
+   those months the house does not generate enough to cover even its daytime
+   load, so no battery of any size receives a charge.
 
 4. **Only 48.2% of nights could be fully covered by that day's surplus even
    with an infinite battery.** By month: June 90.6%, July 86.5%, September
@@ -62,7 +65,7 @@ the 2,031 nights with better than 95% sample coverage, spanning 2020-05-20 to
    | Mode | Power | Duration | Example |
    |---|---|---|---|
    | Fast | ~8 kW | 3–4 h | 2023-12-28, 44.5 kWh night, peak 9,684 W |
-   | Slow | ~3.5 kW | 12+ h | 2023-11-13, 42.9 kWh night, peak under 3.7 kW |
+   | Slow | ~3.5 kW | 12+ h | 2022-11-13, 42.9 kWh night, peak 3,732 W |
 
    A "≥1 h above 5 kW" rule finds 53 nights and misses every slow-mode night.
 
@@ -73,6 +76,20 @@ the 2,031 nights with better than 95% sample coverage, spanning 2020-05-20 to
 7. **EV charging began in 2022.** Nights with ≥1 h above 5 kW: zero in 2020 and
    2021, then 7 (2022), 20 (2023), 12 (2024), 14 (2025). Yearly maximum night
    consumption steps from ~16.5 kWh (2020–21) to ~43 kWh (2022 onward).
+
+   **This was measured with the ≥1 h above 5 kW rule, not the rule §3 adopts.**
+   The adopted "≥2 h above 2 kW" classifier additionally flags six pre-2022
+   winter evenings — 2020-11-15, 2020-12-13, 2021-03-15, 2021-11-29,
+   2021-12-19, 2021-12-25 — each 14.7 to 16.5 kWh with a 3.5–5.1 kW load for
+   about two hours, and none showing the fast-charge signature. Plausibly a
+   heat pump, oven or dryer; certainly not a car that did not exist yet.
+
+   These six are a **known false-positive rate of 6 in 72**, and they are
+   already included in fact 6's counts, so those figures stand. The rule is
+   deliberately *not* tightened to remove them: six nights out of a 1,959-night
+   household pool cannot move the sizing, and a heuristic whose limits are
+   visible is worth more than one tuned until a claim comes true. The §3
+   sensitivity table exists to expose exactly this.
 
 8. **A 3 kW discharge cap is nearly free on ordinary nights and crippling on EV
    nights.** Share of night energy drawn above 3 kW, which no 3 kW battery can
@@ -93,9 +110,10 @@ the 2,031 nights with better than 95% sample coverage, spanning 2020-05-20 to
    as a finding.
 
 10. **Consumption nulls are preserved, not zero-filled** (inherited from phase 1,
-    spec §3 there): 1,315 rows have no `Power Consumption` reading, concentrated
-    in 2020 and 2022. A null means unrecorded, not zero. Nights below 95%
-    sample coverage are therefore excluded from per-night statistics (§3).
+    spec §3 there): `power_cons_w` has 1,505 rows with no reading and
+    `energy_cons_wh` has 1,315, concentrated in 2020 and 2022. A null means
+    unrecorded, not zero. Nights below 95% sample coverage are therefore
+    excluded from per-night statistics (§3).
 
 ## 3. Night aggregation and EV classification
 
@@ -197,10 +215,19 @@ self-sufficiency (%), and full-equivalent cycles per year.
 
 The knee is located on **marginal grid import avoided per additional kWh of
 capacity**. "Where the curve flattens" is not implementable as written, so the
-rule is explicit: the recommended capacity is the **smallest capacity whose
-marginal return has fallen below 50 kWh/yr per additional kWh**. An extra kWh
-of battery earning less than 50 kWh/yr is cycling under about once a week, at
-which point it is hard to justify buying.
+rule is explicit: the recommended capacity is the **smallest capacity beyond
+which the marginal return never rises above 50 kWh/yr per additional kWh
+again**. An extra kWh of battery earning less than 50 kWh/yr is cycling under
+about once a week, at which point it is hard to justify buying.
+
+**The curve is not monotonic, which is why the rule says "never again" rather
+than "first below".** Measured on the real non-EV curve at 3 kW: marginal
+return is only 36.8 kWh/yr per kWh at 0.5 kWh, climbs to a peak of 134.0 at
+2.5 kWh, and falls back through the threshold between 7.0 (50.6) and 7.5
+(41.3). A very small battery is exhausted within minutes of sunset, so its
+first half-kWh buys almost nothing; adding capacity lets it carry more of the
+evening load before saturating. A "first capacity below the threshold" rule
+fires on the leading edge of that climb and returns a degenerate 0.5 kWh.
 
 The 50 kWh/yr figure is a stated judgement, not a derived constant. The report
 therefore prints the full marginal-return table beside the curve and marks the
