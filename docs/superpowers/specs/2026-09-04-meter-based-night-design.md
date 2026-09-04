@@ -143,6 +143,15 @@ long enough to do both.
 - Simulating on the two flows separately assumes it caught both. This
   **overstates**.
 
+**"Separately" means separate steps, not arithmetic.** No single signed
+number can express "charge the 0.3 kWh exported *and* discharge the 0.5 kWh
+imported" within one interval — any attempt either makes the gross bound
+worse than the net one, or erases a real discharge need. So the gross signal
+is a **doubled series**: each interval becomes two steps, the export offered
+for charging and the import presented for discharging, each carrying the full
+15-minute power allowance. A real battery could not quite manage both at full
+power; that deliberate optimism is what makes it an upper bound.
+
 Both are run and the pair is reported as a range. Neither is presented as the
 answer, and no midpoint is invented.
 
