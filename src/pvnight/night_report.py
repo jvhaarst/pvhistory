@@ -112,12 +112,23 @@ def chart_knee(sweep: pd.DataFrame, recommended_kwh: float) -> str:
 
 def chart_marginal(sweep: pd.DataFrame, recommended_kwh: float,
                     threshold: float = 50.0) -> str:
+    """Marginal kWh/yr avoided per added kWh, both scenarios.
+
+    The recommendation (``recommend_capacity``) is taken from the non-EV
+    curve (``nonev_marginal_kwh_per_kwh``), so that is the series emphasised
+    and the one the knee marker and threshold line are read against. The
+    all-nights curve (``marginal_kwh_per_kwh``) is plotted alongside for
+    context only.
+    """
     fig, ax = plt.subplots(figsize=(9, 4))
     d = sweep[sweep["power_kw"] == 3.0].sort_values("capacity_kwh")
-    ax.plot(d.capacity_kwh, d.marginal_kwh_per_kwh, lw=2, color=SERIES[0])
-    ax.axhline(threshold, color=SERIES[1], ls="--", lw=1,
+    ax.plot(d.capacity_kwh, d.nonev_marginal_kwh_per_kwh, lw=2, color=SERIES[0],
+            label="household nights only (used for the recommendation)")
+    ax.plot(d.capacity_kwh, d.marginal_kwh_per_kwh, lw=1.5, color=SERIES[1],
+            alpha=0.6, label="all nights (context)")
+    ax.axhline(threshold, color=FURNITURE, ls="--", lw=1,
                label=f"{threshold:.0f} kWh/yr per kWh cut-off")
-    ax.axvline(recommended_kwh, color=FURNITURE, ls="--", lw=1)
+    ax.axvline(recommended_kwh, color=FURNITURE, ls=":", lw=1)
     ax.set_xlabel("battery capacity (kWh, nameplate)")
     ax.set_ylabel("marginal kWh/yr avoided per added kWh")
     ax.legend(frameon=False, labelcolor=FURNITURE, fontsize=8)
@@ -174,8 +185,47 @@ TABLE_CSS = """
 table { border-collapse: collapse; font-size: 13px; width: 100%; }
 th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; }
+tr.knee { font-weight: 600; background: color-mix(in srgb, var(--accent) 12%, transparent); }
 </style>
 """
+
+
+def _marginal_table(sweep: pd.DataFrame, recommended_kwh: float,
+                     power_kw: float = 3.0, max_kwh: float = 12.0) -> str:
+    """Spec S4.4's promised marginal-return table: capacity against both
+    marginal curves and the non-EV night grid import they are computed
+    from, so a reader who prefers a different cut-off than the stated 50
+    kWh/yr can read their own answer straight off this table rather than
+    eyeballing the chart above it. The chosen knee row is marked.
+
+    Capped at ``max_kwh`` — beyond that both curves are flat and a full
+    0-30 kWh table would be 61 uninformative rows.
+    """
+    d = sweep[(sweep["power_kw"] == power_kw) & (sweep["capacity_kwh"] > 0)
+              & (sweep["capacity_kwh"] <= max_kwh)].sort_values("capacity_kwh")
+    head = "".join(f"<th>{h}</th>" for h in
+                    ["capacity (kWh)", "non-EV marginal (kWh/yr per kWh)",
+                     "all-nights marginal (kWh/yr per kWh)",
+                     "non-EV night grid import (kWh/yr)", ""])
+    rows = []
+    for r in d.itertuples():
+        cls = ' class="knee"' if np.isclose(r.capacity_kwh, recommended_kwh) else ""
+        note = "recommended" if np.isclose(r.capacity_kwh, recommended_kwh) else ""
+        rows.append(
+            f"<tr{cls}><td>{r.capacity_kwh:.1f}</td>"
+            f"<td>{r.nonev_marginal_kwh_per_kwh:.1f}</td>"
+            f"<td>{r.marginal_kwh_per_kwh:.1f}</td>"
+            f"<td>{r.nonev_night_grid_import_kwh_yr:.1f}</td>"
+            f"<td>{note}</td></tr>"
+        )
+    body = "".join(rows)
+    return (
+        f'<div class="chart"><table><thead><tr>{head}</tr></thead>'
+        f"<tbody>{body}</tbody></table>"
+        f'<p style="color:var(--muted);font-size:12px;margin-top:6px">'
+        f"Table stops at {max_kwh:.0f} kWh: beyond that both curves are "
+        "flat and the extra rows say nothing new.</p></div>"
+    )
 
 
 def _sensitivity_table(sens: pd.DataFrame) -> str:
@@ -273,8 +323,19 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
          "above 50 kWh/yr per added kWh again — an extra kWh cycling less "
          "than once a week from there on. <strong>That 50 is a stated "
          "judgement, not a derived constant</strong>: read your own "
-         "cut-off straight off this curve if you prefer a different one.",
-         chart_marginal(sweep_df, recommended_kwh)),
+         "cut-off straight off this table if you prefer a different one. "
+         "The rule is applied to the <strong>household (non-EV) curve</strong>, "
+         "plotted heavier below, with the all-nights curve shown alongside "
+         "for context; the knee marker sits on the non-EV curve. Note also "
+         "that the \"about once a week\" reasoning is about total avoided "
+         "import, while the rule is applied to the non-EV curve specifically "
+         "— which biases the recommendation smaller, i.e. conservatively. "
+         "The all-nights curve would put the same threshold at 8.0 kWh "
+         "instead of the recommended 7.5. A reader comparing \"under once a "
+         "week\" against the reported cycles/yr figure above should keep "
+         "that distinction in mind.",
+         chart_marginal(sweep_df, recommended_kwh),
+         _marginal_table(sweep_df, recommended_kwh)),
         ("When the battery actually works",
          "Discharge by month at the recommended capacity. The winter months "
          "are near-idle, which is the same finding as the third chart seen "
@@ -295,7 +356,8 @@ def build_html(nights_df: pd.DataFrame, sweep_df: pd.DataFrame,
     ]
     card_html = "".join(
         f'<section class="card"><h2>{t}</h2><p>{c}</p>'
-        f'<div class="chart">{svg}</div></section>' for t, c, svg in cards)
+        f'<div class="chart">{svg}</div>{rest[0] if rest else ""}</section>'
+        for t, c, svg, *rest in cards)
 
     ev_note = (
         '<section class="card"><h2>How EV nights were identified</h2>'

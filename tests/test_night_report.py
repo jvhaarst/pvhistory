@@ -121,3 +121,13 @@ def test_marginal_caption_describes_the_last_crossing_not_the_first(toy):
     low = html.lower()
     assert "first capacity" not in low
     assert "never" in low and "judgement" in low
+
+
+def test_marginal_chart_plots_the_series_the_recommendation_uses(toy):
+    """chart_marginal once plotted the all-nights curve under a caption
+    describing the non-EV one, putting the knee marker on the wrong side of
+    the cut-off line."""
+    from pvnight import night_report
+    import inspect
+    src = inspect.getsource(night_report.chart_marginal)
+    assert "nonev_marginal_kwh_per_kwh" in src
