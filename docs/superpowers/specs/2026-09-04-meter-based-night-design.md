@@ -198,7 +198,7 @@ compared against phase 2's 72 nights, and the difference reported.
 
 **`out/meter_night_summary.csv`** — one row per night: `date`,
 `night_start_utc`, `night_end_utc`, `import_kwh`, `export_kwh`, `peak_kw`,
-`hours_above_2kw`, `is_ev`, `coverage`, `missing_intervals`.
+`hours_above_2kw`, `is_ev`, `missing_intervals`, `covered`. Note `covered` is a boolean, not a ratio as in phase 2: the meter either recorded an interval or it did not, so there is no partial coverage to express.
 
 **`out/meter_battery_sweep.csv`** — one row per (capacity, power, bound):
 the phase-2 metric set plus a `bound` column taking `net` or `gross`.
