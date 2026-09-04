@@ -147,3 +147,88 @@ leaves less headroom later, a real (if small) dispatch knock-on through the
 year-long chronological simulation, not the power cap itself binding. Either
 way the conclusion holds: at a capacity worth buying, inverter power is not
 the binding constraint here — capacity and winter generation are.
+
+## Night consumption measured at the smart meter
+
+```
+uv run python analyze_meter.py
+```
+
+**PVOutput's consumption channel undercounts the house from December 2022
+onward**, so the meter-based figures below supersede the phase-2 figures in
+the section above. Phase 2's outputs are kept, and still regenerated, for
+comparison only — they should not be used to size anything.
+
+The evidence is a direct monthly cross-check of the two independent sources
+over the nights both call usable: PVOutput's night energy divided by the
+meter's holds near 0.98 across 2020 through November 2022 (0.95–0.99 month by
+month), steps to 0.74 in December 2022, and never recovers. A ratio that steps in one month and stays
+down is a hardware fault — most plausibly a CT clamp off one of the incoming
+lines — not gradual drift. The measured shortfall is 24.9% in 2023, 27.6% in
+2024 and **30.8% in 2025**.
+
+`analyze_meter.py` reads the quarter-hourly meter exports from
+`data/meterdata/`, reports (rather than interpolates) the gaps in them, cuts
+them against the same night boundaries in `out/solar_windows.csv`, runs the
+capacity sweep under both within-interval orderings, measures the resolution
+penalty against phase 2's finer data, and writes three files to `out/`:
+`meter_night_summary.csv`, `meter_battery_sweep.csv`, and
+`meter_report.html`.
+
+**`out/meter_night_summary.csv`** — one row per calendar date (2,556 data
+rows), from the meter. Night window, `import_kwh` and `export_kwh` across it,
+`peak_kw`, `hours_above_2kw`, `is_ev`, `missing_intervals`, and `covered`.
+Unlike phase 2 there is no partial-coverage ratio: the meter either recorded
+a quarter hour or it did not, so `covered` is a plain boolean meaning the
+night sits inside the meter's span and contains no missing interval. Across
+2,427 covered nights (2020-01-01 to 2026-09-02) median night consumption is
+**5.91 kWh** (p90 12.43 kWh) against phase 2's 4.85 kWh from the same house;
+135 of those nights are EV-charging, at a median of 24.8 kWh against 5.69 kWh
+for the rest.
+
+**`out/meter_battery_sweep.csv`** — the same columns as
+`battery_sweep.csv`, plus a `bound` column. A quarter hour can record both
+import and export — 13.5% of them do — and the meter cannot say which came
+first, which decides how much of that import a battery could have bridged.
+Every capacity is therefore simulated twice, as `charge_first` and
+`discharge_first`, sharing a baseline: both reproduce the measured grid
+import exactly at zero capacity. Neither is the answer; the pair is the
+range.
+
+**`out/meter_report.html`** — the side-by-side page, leading with the meter
+and showing phase 2 dashed and labelled superseded. A local build artefact,
+git-ignored like the other two reports.
+
+### Gaps are excluded, not counted as quiet nights
+
+The meter record has seven gaps. Four fall in January 2024 and together
+remove most of 8–19 January; that alone drops **10 nights** from the
+analysis, and 129 nights are dropped in total. Midwinter is the season that
+dominates a battery answer, so treating those nights as unusually low
+consumption would understate exactly the demand that matters.
+
+### Recommended capacity
+
+The elbow of the household (non-EV) capacity curve at 3 kW lands at **9.0 kWh
+under both orderings** — the bracket is narrow enough here that it does not
+move the answer. Phase 2's elbow on the same rule is 8.0 kWh (the 7.5 kWh
+quoted further up comes from the retired 50 kWh/kWh threshold rule, not from
+the elbow), so the meter moves the answer up by half a step. That is the
+expected direction: a channel that could not see part of the load understated
+the night it had to carry. At 9.0 kWh the simulation gives about 36% household
+night self-sufficiency at around 174 full-equivalent cycles per year. The
+winter wall from phase 2 is unchanged and still binding — no capacity fixes a
+month with no daytime surplus to charge from.
+
+### The resolution penalty
+
+The meter records at 15 minutes, and averaging over 15 minutes hides short
+peaks, so a battery simulated at that resolution should flatter itself.
+Rather than assume a size for that, it is measured: phase 2's 5-minute
+PVOutput data is summed in consecutive threes into 15-minute totals, the same
+capacity sweep is run over both, and the two are read at the 5-minute elbow.
+The measured penalty is **0.08%** — negligible. That is the expected result
+once stated: at night there is no generation to cancel against load within an
+interval, and a power cap in kW binds at the same rate whatever the interval
+length, so coarsening only blurs the daytime charging. The figure is reported
+because it was measured, not because it is large.
