@@ -71,10 +71,21 @@ def _svg(fig) -> str:
 
 
 def _reference_year(windows: pd.DataFrame) -> int:
-    """The most completely represented year in the window table."""
+    """The most recent fully-observed year in the window table.
+
+    Picking by row count alone ties 2020 (partial, extrapolated before
+    20 May) against fully-observed years, and the tie-break can hand the
+    charts a year that's ~40% extrapolated. Preferring the latest year with
+    no extrapolated rows keeps charts 1 and 4 drawing from real data.
+    """
     if windows.empty:
         raise ValueError("_reference_year: windows frame is empty")
-    return int(pd.to_datetime(windows["date"]).dt.year.value_counts().idxmax())
+    years = pd.to_datetime(windows["date"]).dt.year
+    has_extrapolated = windows.groupby(years)["extrapolated"].any()
+    clean_years = has_extrapolated.index[~has_extrapolated]
+    if len(clean_years):
+        return int(clean_years.max())
+    return int(years.value_counts().idxmax())
 
 
 def _local_hours(ts) -> np.ndarray:
@@ -115,14 +126,34 @@ def chart_light_times(events: pd.DataFrame, windows: pd.DataFrame) -> str:
 
 
 def chart_elevation_envelope(model, events: pd.DataFrame) -> str:
-    """The model itself: elevation at first/last light, and the fitted curves."""
+    """The model itself: elevation at first/last light, and the fitted curves.
+
+    Points are coloured by year rather than by edge (first/last light):
+    the assumption under test here (spec section 10) is that hardware and
+    panel changes have not moved the start-up threshold over 2020-2025, and
+    year is the variable that would show it. It's an ordered quantity, so
+    it draws from the sequential ramp already used for the coverage
+    heatmap rather than an unordered categorical palette. The fitted curves
+    and raw-percentile dotted lines are drawn last so they stay legible on
+    top of the scatter.
+    """
     fig, ax = plt.subplots(figsize=(9, 4.5))
 
     doy = _doy(events["solar_date"])
-    ax.scatter(doy, events["el_first"], s=3, alpha=0.18, color=SERIES[0],
-               linewidths=0, label="first light")
-    ax.scatter(doy, events["el_last"], s=3, alpha=0.18, color=SERIES[1],
-               linewidths=0, label="last light")
+    years = pd.to_datetime(events["solar_date"]).dt.year.to_numpy()
+    distinct_years = sorted(set(years.tolist()))
+    # Evenly spaced samples along the sequential ramp, one per year, in
+    # chronological (i.e. ramp) order.
+    ramp_positions = np.linspace(0.15, 0.95, len(distinct_years))
+    year_colour = {
+        yr: COVERAGE_CMAP(pos) for yr, pos in zip(distinct_years, ramp_positions)
+    }
+    point_colours = [year_colour[yr] for yr in years]
+
+    ax.scatter(doy, events["el_first"], s=4, alpha=0.35, c=point_colours,
+               linewidths=0, marker="^")
+    ax.scatter(doy, events["el_last"], s=4, alpha=0.35, c=point_colours,
+               linewidths=0, marker="v")
 
     grid_doy = np.arange(1, 367)
     ax.plot(grid_doy, model.raw_start, color=SERIES[0], lw=0.8, ls=":")
@@ -136,11 +167,20 @@ def chart_elevation_envelope(model, events: pd.DataFrame) -> str:
                 xytext=(300, SUNRISE_ELEVATION_DEG + 1.2),
                 color=FURNITURE, fontsize=8)
 
+    year_handles = [
+        plt.Line2D([0], [0], marker="o", ls="", color=year_colour[yr],
+                    markersize=5, label=str(yr))
+        for yr in distinct_years
+    ]
+    curve_handles, curve_labels = ax.get_legend_handles_labels()
+    ax.legend(handles=year_handles + curve_handles,
+              labels=[str(yr) for yr in distinct_years] + curve_labels,
+              frameon=False, labelcolor=FURNITURE, fontsize=8, ncol=2)
+
     ax.set_xlabel("day of year")
     ax.set_ylabel("solar elevation at edge (degrees)")
     ax.set_xlim(1, 366)
     ax.set_ylim(-6, 6)
-    ax.legend(frameon=False, labelcolor=FURNITURE, fontsize=8)
     return _svg(fig)
 
 
@@ -188,7 +228,8 @@ def chart_night_length(windows: pd.DataFrame) -> str:
 
 
 def chart_coverage(loaded: pd.DataFrame) -> str:
-    """Generating samples per day, by year — shows 2020's partial start."""
+    """Generating samples per day, by year — shows 2020's partial start and
+    the five generation-free days (spec section 7.3 chart 5)."""
     if loaded.empty:
         raise ValueError("chart_coverage: loaded frame is empty")
     daily = loaded.groupby("solar_date")["generating"].sum()
@@ -200,15 +241,26 @@ def chart_coverage(loaded: pd.DataFrame) -> str:
         index="year", columns="doy", values="n", aggfunc="max"
     ).reindex(columns=np.arange(1, 367))
 
+    # Zero-generation days are the interesting anomaly (fact 4), so they
+    # must not be just the palest shade of an otherwise-continuous ramp:
+    # mask them out and paint masked cells in a distinct colour instead.
+    # dataviz skill categorical slot 2 (orange) for masked/zero cells.
+    cmap = COVERAGE_CMAP.with_extremes(bad="#d95926")
+    masked = np.ma.masked_equal(grid.to_numpy(), 0)
+
     fig, ax = plt.subplots(figsize=(9, 2.8))
-    ax.imshow(
-        grid.to_numpy(), aspect="auto", origin="lower", cmap=COVERAGE_CMAP,
+    im = ax.imshow(
+        masked, aspect="auto", origin="lower", cmap=cmap,
         interpolation="nearest",
         extent=[1, 366, grid.index.min() - 0.5, grid.index.max() + 0.5],
     )
     ax.set_yticks(list(grid.index))
     ax.set_yticklabels([str(y) for y in grid.index])
     ax.set_xlabel("day of year")
+    cbar = fig.colorbar(im, ax=ax, pad=0.015)
+    cbar.set_label("generating samples per day", color=FURNITURE)
+    cbar.ax.tick_params(colors=FURNITURE)
+    cbar.outline.set_edgecolor(FURNITURE)
     return _svg(fig)
 
 
@@ -341,10 +393,16 @@ def build_html(model, events: pd.DataFrame, windows: pd.DataFrame,
          "inward; the envelope tracks the outer edge.",
          chart_light_times(events, windows)),
         ("The model",
-         "Solar elevation at each day edge. Dotted lines are the pooled "
-         "5th percentiles, solid lines the 2-harmonic fit. The threshold "
-         "rises by about a degree in winter, when the inverter needs more "
-         "irradiance to start.",
+         "Solar elevation at each day edge, points coloured by year. "
+         "Dotted lines are the pooled 5th percentiles, solid lines the "
+         "2-harmonic fit. The threshold rises by about a degree in "
+         "winter, when the inverter needs more irradiance to start. "
+         "<em>The start-up threshold steps by about 1.2&deg; at the "
+         "2023/2024 boundary</em> — larger than the seasonal signal "
+         "itself, and coincident with the smallest reported power "
+         "jumping from 1 W to 6 W, so this is a reporting or hardware "
+         "regime change rather than gradual drift. The pooled fit shown "
+         "here describes the 2020-2023 regime more than the current one.",
          chart_elevation_envelope(model, events)),
         ("Shading screen",
          "A flat line means no obstruction. <em>Read this only as a "
