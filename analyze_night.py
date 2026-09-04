@@ -15,12 +15,16 @@ POWER_KWS = (2.5, 3.0, 3.7)
 CAP_W = 3000.0
 
 
-def _monthly(samples: pd.DataFrame, nights_df: pd.DataFrame,
-             windows: pd.DataFrame, recommended_kwh: float) -> pd.DataFrame:
-    """Per-month medians the charts need."""
+def _daily_energy(samples: pd.DataFrame, windows: pd.DataFrame) -> pd.DataFrame:
+    """Per-date generation and daytime consumption, in Wh.
+
+    `nights.consumption_increments` preserves NaN for genuinely unrecorded
+    readings, so the running total MUST use `np.nancumsum`. A plain `cumsum`
+    poisons every value after the first gap — and the first gap is at index 1,
+    so it poisons essentially everything.
+    """
     s = samples.sort_values("ts_utc").reset_index(drop=True)
-    delta = nights.consumption_increments(s)
-    cum = np.concatenate([[0.0], delta.to_numpy().cumsum()])
+    cum = np.concatenate([[0.0], np.nancumsum(nights.consumption_increments(s).to_numpy())])
     ts = s["ts_utc"].to_numpy()
 
     gen = s.groupby("solar_date")["energy_gen_wh"].max().rename("gen_wh").reset_index()
@@ -29,10 +33,20 @@ def _monthly(samples: pd.DataFrame, nights_df: pd.DataFrame,
     i = np.searchsorted(ts, ws["solar_start_utc"].to_numpy(), "left")
     j = np.searchsorted(ts, ws["solar_end_utc"].to_numpy(), "right")
     day = pd.DataFrame({"date": ws["date"].values, "day_cons_wh": cum[j] - cum[i]})
+    return gen.merge(day, on="date")
+
+
+def _monthly(samples: pd.DataFrame, nights_df: pd.DataFrame,
+             windows: pd.DataFrame, recommended_kwh: float) -> pd.DataFrame:
+    """Per-month medians the charts need."""
+    s = samples.sort_values("ts_utc").reset_index(drop=True)
+    ts = s["ts_utc"].to_numpy()
+
+    daily = _daily_energy(samples, windows)
 
     n = nights_df[nights_df["covered"]].copy()
     n["date"] = pd.to_datetime(n["date"])
-    m = gen.merge(day, on="date").merge(n[["date", "night_wh", "is_ev"]], on="date")
+    m = daily.merge(n[["date", "night_wh", "is_ev"]], on="date")
     m["month"] = m["date"].dt.month
     m["gen_kwh"] = m["gen_wh"] / 1000
     m["day_cons_kwh"] = m["day_cons_wh"] / 1000
@@ -73,19 +87,16 @@ def _coverable_fraction(samples: pd.DataFrame, nights_df: pd.DataFrame,
     Computed rather than quoted, so the report's headline caveat cannot drift
     away from the data it describes.
     """
-    s = samples.sort_values("ts_utc").reset_index(drop=True)
-    cum = np.concatenate([[0.0], nights.consumption_increments(s).to_numpy().cumsum()])
-    ts = s["ts_utc"].to_numpy()
-    gen = s.groupby("solar_date")["energy_gen_wh"].max().rename("gen_wh").reset_index()
-    gen["date"] = pd.to_datetime(gen["solar_date"])
-    ws = windows.dropna(subset=["solar_start_utc", "solar_end_utc"])
-    i = np.searchsorted(ts, ws["solar_start_utc"].to_numpy(), "left")
-    j = np.searchsorted(ts, ws["solar_end_utc"].to_numpy(), "right")
-    day = pd.DataFrame({"date": ws["date"].values, "day_cons_wh": cum[j] - cum[i]})
+    daily = _daily_energy(samples, windows)
 
     n = nights_df[nights_df["covered"]].copy()
     n["date"] = pd.to_datetime(n["date"])
-    m = gen.merge(day, on="date").merge(n[["date", "night_wh"]], on="date")
+    m = daily.merge(n[["date", "night_wh"]], on="date")
+    if m.empty:
+        raise ValueError(
+            "_coverable_fraction: no dates in common between samples/windows "
+            "and covered nights — refusing to silently return 0.0"
+        )
     surplus = m["gen_wh"] - m["day_cons_wh"]
     return float((surplus >= m["night_wh"]).mean())
 

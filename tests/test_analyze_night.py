@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -23,6 +25,51 @@ def test_run_writes_all_three_outputs(tmp_path, data_dir):
     # coverage filter, so the covered range genuinely begins later.
     assert s["first_night"] == "2020-05-24"
     assert s["last_night"] == "2025-12-30"
+
+    # Unpinned summary keys: pin them to a plausible range so a future
+    # regression (e.g. another NaN-poisoned prefix sum) is caught here too.
+    assert s["n_nights"] == 2031
+    assert 30 < s["night_self_sufficiency_pct"] < 45
+    assert 150 < s["cycles_per_yr"] < 200
+
+
+def test_monthly_surpluses_are_finite(tmp_path, data_dir):
+    """A NaN-poisoned prefix sum made every surplus NaN, which silently
+    flipped the report's headline finding to its opposite. Pin it."""
+    from pvnight.loader import load
+    from pvnight import nights as N
+    import analyze_night as A
+
+    samples = load(data_dir)
+    windows = pd.read_csv(
+        Path(data_dir) / "out" / "solar_windows.csv",
+        parse_dates=["date", "solar_start_utc", "solar_end_utc",
+                     "night_start_utc", "night_end_utc"],
+    )
+    nights_df = N.summarise_nights(samples, windows)
+    monthly = A._monthly(samples, nights_df, windows, 7.5)
+
+    assert monthly["day_cons_kwh"].notna().all()
+    assert monthly["surplus_kwh"].notna().all()
+    winter = [int(m) for m in monthly.loc[monthly["surplus_kwh"] < 0, "month"]]
+    assert set(winter) >= {11, 12, 1}, f"expected a winter deficit, got {winter}"
+
+
+def test_coverable_fraction_matches_the_measured_ceiling(tmp_path, data_dir):
+    """Spec fact 4: about 48% of nights are coverable even with infinite
+    storage. A broken prefix sum returned a plausible-looking 0.0."""
+    from pvnight.loader import load
+    from pvnight import nights as N
+    import analyze_night as A
+
+    samples = load(data_dir)
+    windows = pd.read_csv(
+        Path(data_dir) / "out" / "solar_windows.csv",
+        parse_dates=["date", "solar_start_utc", "solar_end_utc",
+                     "night_start_utc", "night_end_utc"],
+    )
+    nights_df = N.summarise_nights(samples, windows)
+    assert 0.40 < A._coverable_fraction(samples, nights_df, windows) < 0.55
 
 
 def test_power_cap_sensitivity_is_measured_not_assumed(tmp_path, data_dir):
