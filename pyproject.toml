@@ -1,0 +1,29 @@
+[project]
+name = "pvnight"
+version = "0.1.0"
+description = "Determine the daily solar-possible window from PVOutput history"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2",
+    "pyarrow>=16",
+    "pvlib>=0.11",
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pvnight"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# analyze.py lives at the repo root, outside the installed package, so the
+# root must be importable for tests/test_analyze.py.
+pythonpath = ["."]
+filterwarnings = ["ignore::DeprecationWarning"]

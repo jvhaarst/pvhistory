@@ -21,7 +21,7 @@ These apply to every task. Values are copied verbatim from the spec.
 - **Never pass these files through `lzma`.** Despite the `.xz` suffix they are plain Parquet; `pandas.read_parquet` reads them directly (spec §2).
 - **Null generation values are zero**, not missing (spec fact 2).
 - **Sunrise elevation constant:** `-0.8358` degrees.
-- **Model parameters:** pooling half-width 10 days, percentile 5.0, 2 harmonics, reference year 2024.
+- **Model parameters:** pooling half-width 10 days, percentile 5.0, 2 harmonics. The thresholds table has 366 rows so every leap-year day-of-year slot exists.
 - Run everything through `uv`. Tests: `uv run pytest`.
 
 ## File Structure
@@ -49,7 +49,7 @@ These apply to every task. Values are copied verbatim from the spec.
 **Interfaces:**
 - Consumes: nothing.
 - Produces:
-  - `pvnight.config` module constants: `LATITUDE: float`, `LONGITUDE: float`, `SITE_TZ: str`, `DATA_GLOB: str`, `SUNRISE_ELEVATION_DEG: float`, `POOL_HALF_WIDTH_DAYS: int`, `PERCENTILE: float`, `N_HARMONICS: int`, `REFERENCE_YEAR: int`
+  - `pvnight.config` module constants: `LATITUDE: float`, `LONGITUDE: float`, `SITE_TZ: str`, `DATA_GLOB: str`, `SUNRISE_ELEVATION_DEG: float`, `POOL_HALF_WIDTH_DAYS: int`, `PERCENTILE: float`, `N_HARMONICS: int`
   - `pvnight.loader.generating_flag(df: pd.DataFrame) -> pd.Series` — takes a frame with columns `solar_date`, `power_gen_w`, `power_avg_w`, `energy_gen_wh` sorted chronologically; returns a boolean Series named `generating`.
   - `pvnight.loader.load(data_dir: Path) -> pd.DataFrame` — columns `ts_utc` (tz-aware UTC), `solar_date` (`datetime.date`), `power_gen_w`, `power_avg_w`, `energy_gen_wh`, `power_cons_w`, `energy_cons_wh` (all float64), `generating` (bool). Sorted by `ts_utc`, index reset.
 
@@ -110,7 +110,6 @@ SUNRISE_ELEVATION_DEG = -0.8358
 POOL_HALF_WIDTH_DAYS = 10
 PERCENTILE = 5.0
 N_HARMONICS = 2
-REFERENCE_YEAR = 2024  # leap, so all 366 day-of-year slots exist
 ```
 
 Run: `uv sync`
@@ -300,7 +299,7 @@ def load(data_dir: Path) -> pd.DataFrame:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_loader.py -v`
-Expected: PASS, 10 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -1007,7 +1006,7 @@ def fit(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_envelope.py -v`
-Expected: PASS, 12 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1281,7 +1280,7 @@ Expected: PASS, 14 tests. Building 2,557 daily windows evaluates ~3.7M grid poin
 - [ ] **Step 5: Run the whole suite**
 
 Run: `uv run pytest -v`
-Expected: PASS, 48 tests.
+Expected: PASS, 46 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -1387,8 +1386,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
-
-from . import envelope as env  # noqa: E402
 
 # Neutral grey for axis furniture: legible on both light and dark grounds.
 FURNITURE = "#8a8f98"
@@ -1799,7 +1796,7 @@ Run: `uv run python analyze.py`
 Expected: the summary prints, and `out/` holds the two CSVs and `report.html`.
 
 Run: `uv run pytest`
-Expected: PASS, all 54 tests.
+Expected: PASS, all 52 tests.
 
 - [ ] **Step 6: Write the README**
 
