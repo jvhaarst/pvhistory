@@ -254,9 +254,11 @@ Its only purpose is to answer whether a phase 5 is worth building.
 Tests that must exist, because each covers a way this can be wrong without
 looking wrong:
 
-1. **DST transition days.** An interval at 02:30 local on both the March and
-   October transition dates lands in the correct band, and no interval is
-   unassigned.
+1. **DST transition days.** On the March transition date 02:00 local never
+   occurs and on the October one it occurs twice, so the test cannot simply
+   assert a band for 02:30 local. It must assert that every interval of each
+   transition day receives a band, and that the repeated October hour lands
+   in Dal both times.
 2. **Season boundary.** 31 March 16:00 local is Dal; 1 April 16:00 local is
    SuperDal. Same clock hour, different band.
 3. **Winter afternoon is not SuperDal.** 15 January 12:00 local is Dal.
