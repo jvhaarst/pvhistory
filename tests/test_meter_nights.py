@@ -101,11 +101,17 @@ def test_the_december_2022_step_is_visible(nights, repo_root):
 
 
 def test_january_2024_outage_removes_nights_rather_than_shrinking_them(nights):
-    """Five gaps remove most of 8-19 January 2024. Those nights must be
-    excluded, not counted as unusually quiet midwinter nights."""
+    """Four gaps remove most of 8-19 January 2024. Those nights must be
+    excluded, not counted as unusually quiet midwinter nights.
+
+    The count is pinned at 10 because that is the figure the report page and
+    the README publish. `not .all()` passed with a single night excluded,
+    which would not have caught a regression that quietly recovered nine of
+    them."""
     jan = nights[(nights["date"] >= "2024-01-08") & (nights["date"] <= "2024-01-19")]
     assert len(jan) > 0
-    assert not jan["covered"].all(), "the outage nights should not all be covered"
+    excluded = int((~jan["covered"]).sum())
+    assert excluded == 10, f"expected 10 excluded nights, got {excluded}"
 
 
 def test_ev_sensitivity_grid_has_a_row_per_combination(parts):

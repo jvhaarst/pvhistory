@@ -46,7 +46,7 @@ declines year on year, which fits a lost phase whose share of load is
 |---|---|
 | Solar window (phase 1) | **Sound.** Generation-only; generation is measured well throughout. |
 | The night-extraction method | **Sound.** Agrees with an independent meter to within 2% for 2020–2021 — a genuine external validation. |
-| Night consumption 2023+ | **Understated by 24.9% (2023), 26.7% (2024), 30.8% (2025)**, as a ratio of annual totals. |
+| Night consumption 2023+ | **Understated by 24.9% (2023), 27.6% (2024), 30.8% (2025)**, as a ratio of annual totals. (The 2024 figure was 26.7% in the pre-build estimate; the build measured 27.55% against the full record.) |
 | EV nights specifically | **Worst affected.** For 2023+, ordinary nights are short by a median 1.17 kWh, EV nights by 11.39 kWh against a 34.55 kWh true figure. In 2021–22 the same split shows 0.10 and 0.34 kWh. |
 | Phase 2's EV classifier | **Read a partial signal.** Its 72 nights are the charging that leaked through; more was never visible. |
 | Phase 2's battery recommendation (6.5–9 kWh) | **Probably too small**, sized against a night load materially too low. |
@@ -218,10 +218,12 @@ rather than modelled.
 No phase-1 module is modified. Of phase 2, only `battery.py`'s signature
 changes, additively.
 
-### 5.1 The EV classifier, re-derived
+### 5.1 The EV classifier, retained and re-tested
 
 Phase 2's rule — two hours above 2 kW — was fitted to a signal missing much
-of the car. It is **re-derived against the meter**, and the sensitivity grid
+of the car. The threshold is **retained unchanged** and re-applied to the
+meter — the build measured that the recommended capacity is unmoved across
+every threshold in the grid, so re-fitting it would buy nothing. The grid
 is republished, because the threshold that separated a partial signal is not
 necessarily the one that separates a complete one. The new classification is
 compared against phase 2's 72 nights, and the difference reported.
@@ -230,10 +232,12 @@ compared against phase 2's 72 nights, and the difference reported.
 
 **`out/meter_night_summary.csv`** — one row per night: `date`,
 `night_start_utc`, `night_end_utc`, `import_kwh`, `export_kwh`, `peak_kw`,
-`hours_above_2kw`, `is_ev`, `missing_intervals`, `covered`. Note `covered` is a boolean, not a ratio as in phase 2: the meter either recorded an interval or it did not, so there is no partial coverage to express.
+`hours_above_2kw`, `is_ev`, `missing_intervals`, `covered`. Note `covered` is a boolean here. Phase 2's `covered` was boolean too; what phase 3 has no equivalent of is its separate `coverage` *ratio* column, because the meter either recorded a quarter hour or it did not.
 
 **`out/meter_battery_sweep.csv`** — one row per (capacity, power, bound):
-the phase-2 metric set plus a `bound` column taking `net` or `gross`.
+the phase-2 metric set plus a `bound` column taking `charge_first` or
+`discharge_first`. (Drafted as `net`/`gross`; renamed during the build when
+section 4.2's framing changed to two within-interval orderings.)
 
 **HTML report**, published as a private Artifact. It must:
 
@@ -261,7 +265,7 @@ Test-driven. The load-bearing tests:
    3%. This is the evidence the night-extraction method is sound, and it must
    keep passing.
 2. **The divergence, 2023–2025.** The same comparison shows an annual-total
-   shortfall of 24.9%, 26.7% and 30.8% respectively. Assert each year is
+   shortfall of 24.9%, 27.6% and 30.8% respectively. Assert each year is
    between **20% and 35%** — wide enough that the boundary value of 24.9%
    does not sit on a cliff edge, narrow enough that the fault must still be
    there. The fault is a fact about the data; a test that stops failing here
@@ -272,9 +276,14 @@ Test-driven. The load-bearing tests:
    detected and counted rather than silently interpolated; and a night
    overlapping the January 2024 outage is excluded rather than counted as a
    low-consumption night.
-5. **Both bounds ordered.** For every capacity, the gross bound's grid import
-   is less than or equal to the net bound's. A violation means the bounds are
-   swapped or the dispatch is wrong.
+5. **Both bounds share a baseline, and neither dominates.** At zero capacity
+   the two orderings must reproduce measured grid import exactly — that shared
+   point is what makes them a bracket. They must NOT be asserted to be ordered:
+   this test originally required charge-first to win everywhere, which the
+   build measured to be false. Charge-first wins while the battery has room;
+   discharge-first wins once it is full, because serving the import first
+   frees room to absorb export that would otherwise spill. Test both
+   directions on fixtures that exercise each.
 6. **`dt_hours` actually binds.** The same synthetic series simulated at
    5 and 15 minutes gives a different power-cap outcome — otherwise the
    parameter is decorative.

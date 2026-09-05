@@ -228,13 +228,32 @@ calendar year, so every night after the meter record ends has no data to cut.
 ### Recommended capacity
 
 The elbow of the household (non-EV) capacity curve at 3 kW lands at **9.0 kWh
-under both orderings** — the bracket is narrow enough here that it does not
-move the answer. Phase 2's elbow on the same rule is 8.0 kWh (the 7.5 kWh
-quoted further up comes from the retired 50 kWh/kWh threshold rule, not from
-the elbow), so the meter moves the answer up by half a step. That is the
-expected direction: a channel that could not see part of the load understated
-the night it had to carry. At 9.0 kWh the simulation gives about 36% household
-night self-sufficiency at around 174 full-equivalent cycles per year.
+nameplate under both orderings** — the bracket is narrow enough here that it
+does not move the answer. Phase 2's elbow on the same rule is 8.0 kWh (the
+7.5 kWh quoted further up comes from the retired 50 kWh/kWh threshold rule,
+not from the elbow), so the meter moves the answer up by 1.0 kWh, two steps of
+the 0.5 kWh sweep. That is the expected direction: a channel that could not
+see part of the load understated the night it had to carry.
+
+**The difference is the source, not the span** — and that is measured rather
+than assumed. The meter record runs longer than PVOutput's at both ends, so
+`elbow_on_overlapping_span` re-runs the meter sweep over nothing but the dates
+PVOutput also covers. It still elbows at 9.0 kWh.
+
+**But 9.0 kWh has not converged, and the page now says so.** The elbow moves
+with where the sweep is truncated — 8.5 kWh at a 25 kWh sweep, 9.0 at 30, and
+it keeps climbing beyond the published range. Phase 2's elbow genuinely
+settled; this one does not. So 9.0 is the *low* reading of a curve that
+supports roughly 8-10 kWh, which is what the convergence table on the report
+page already showed. Nobody is being sized too large by it, but it is a lower
+bound rather than a converged answer, and the only route to a defensible
+single number is a real price per kWh — which is what the retained
+`recommend_capacity` is waiting for.
+
+At 9.0 kWh the simulation gives about 36% household
+night self-sufficiency at around 174 full-equivalent cycles per year — a
+figure phase 2 documents as understating by roughly 5%, since partial
+cycles are counted by energy throughput rather than by cycle count.
 
 Phase 2's winter wall — the months whose median daytime surplus is negative,
 where no capacity helps because there is nothing to charge from — is **not

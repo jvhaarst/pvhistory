@@ -70,7 +70,9 @@ def format_penalty_pct(pct: float) -> str:
     """
     if not np.isfinite(pct):
         return "not measured"
-    if pct == 0.0:
+    # Below the deepest precision offered there is nothing left to show, so
+    # snap to zero rather than print "-0.0000%".
+    if abs(pct) < 5e-5:
         return "0%"
     decimals = int(np.clip(np.ceil(-np.log10(abs(pct))) + 1, 1, 4))
     return f"{pct:+.{decimals}f}%"
@@ -315,11 +317,31 @@ def _elbow_stability_table(charge_first_sweep: pd.DataFrame, power_kw: float = 3
     rows = "".join(
         f"<tr><td>{r.sweep_top_kwh:.0f}</td><td>{r.elbow_kwh:.1f}</td>"
         f"<td>{r.top_end_marginal:.2f}</td></tr>" for r in d.itertuples())
+    # Whether the elbow has settled is read off the table, never asserted.
+    # This caption was inherited from phase 2, where the last two rows agreed
+    # and the claim was true. On this data they do not agree, and the
+    # inherited sentence said the opposite of the numbers printed under it.
+    settled = len(d) >= 2 and d["elbow_kwh"].iloc[-1] == d["elbow_kwh"].iloc[-2]
+    if settled:
+        verdict = (
+            f"The last two truncations both read "
+            f"<strong>{d['elbow_kwh'].iloc[-1]:.1f} kWh</strong>, so the "
+            "elbow has stopped moving with the sweep — the signal that the "
+            "sweep was carried far enough.")
+    else:
+        verdict = (
+            f"The last two truncations read "
+            f"<strong>{d['elbow_kwh'].iloc[-2]:.1f}</strong> and "
+            f"<strong>{d['elbow_kwh'].iloc[-1]:.1f} kWh</strong>, so the "
+            "elbow has <strong>not</strong> settled: it is still climbing "
+            "where the sweep stops. The headline figure is therefore the "
+            "reading of a sweep carried to "
+            f"{d['sweep_top_kwh'].iloc[-1]:.0f} kWh, and a longer sweep "
+            "reads higher. Treat it as the low end of the range in the "
+            "convergence table above, not as a converged answer.")
     return (
         '<p class="sub">How the elbow (charge-first bound) moves as the '
-        "sweep is truncated. Once the top-end marginal return has gone "
-        "flat, the elbow stops moving with it — the signal the sweep went "
-        "far enough.</p>"
+        f"sweep is truncated. {verdict}</p>"
         f'<div class="chart"><table><thead><tr>{head}</tr></thead>'
         f"<tbody>{rows}</tbody></table></div>"
     )
@@ -414,7 +436,8 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
                 meter_sweep: pd.DataFrame, pv_sweep: pd.DataFrame,
                 sensitivity: pd.DataFrame, monthly_ratio: pd.DataFrame,
                 gaps: pd.DataFrame, resolution_penalty_pct: float,
-                excluded_nights: int) -> str:
+                excluded_nights: int,
+                elbow_overlapping_span: float = float("nan")) -> str:
     """Assemble the report. No document wrapper — the host supplies it.
 
     Leads with the meter figures; phase 2's PVOutput-based figures are shown
@@ -433,6 +456,13 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
     covered_meter = meter_nights[meter_nights["covered"]]
     ev_share = (100.0 * covered_meter["is_ev"].sum() / len(covered_meter)
                 if len(covered_meter) else float("nan"))
+    if len(covered_meter):
+        _d = pd.to_datetime(covered_meter["date"])
+        span_label = ("covered nights behind these figures, "
+                      f"{_d.min():%b %Y}–{_d.max():%b %Y}")
+    else:
+        span_label = "covered nights behind these figures"
+
     gaps_info = gap_summary(gaps)
     excluded_label = (
         f"nights excluded around the {gaps_info['month_name']} outage"
@@ -442,12 +472,26 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
 
     # The bracket can collapse: if both orderings elbow at the same capacity,
     # "9.0–9.0 kWh" is a range only typographically. Say the actual finding.
+    #
+    # "nameplate" is not decoration. The sweep's capacities are nameplate and
+    # only `usable_fraction` of each is cycled, so a reader comparing product
+    # datasheets is reading a different number without that word.
     degenerate = lo == hi
-    capacity_stat = (f"{lo:.1f} kWh" if degenerate else f"{lo:.1f}–{hi:.1f} kWh")
+    capacity_stat = (f"{lo:.1f} kWh" if degenerate
+                     else f"{lo:.1f}–{hi:.1f} kWh")
+    # Whether the elbow settled decides how the tile may describe itself, so
+    # it is read from the same table the stability card prints rather than
+    # assumed. An unsettled elbow is a lower bound, not a recommendation.
+    stab = elbow_stability(cf, power_kw=power_kw)
+    elbow_settled = (len(stab) >= 2
+                     and stab["elbow_kwh"].iloc[-1] == stab["elbow_kwh"].iloc[-2])
+    settled_note = ("" if elbow_settled
+                    else ", low end — still climbing where the sweep stops")
     capacity_caption = (
-        "recommended capacity, the same under both within-interval orderings"
+        f"nameplate capacity, the same under both within-interval "
+        f"orderings{settled_note}"
         if degenerate else
-        "recommended capacity, range across the charge-first / "
+        "nameplate capacity, range across the charge-first / "
         "discharge-first bounds")
     penalty_text = format_penalty_pct(resolution_penalty_pct)
 
@@ -471,6 +515,30 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
         "the meter itself only records at 15 minutes."
     )
 
+    # The two curves cover different spans — the meter record runs longer at
+    # both ends — so attributing their difference to the SOURCE requires
+    # showing it is not the span. The restricted re-run is measured in
+    # `analyze_meter.elbow_on_overlapping_span` and quoted here; if it was
+    # not supplied, the page says so rather than implying the check happened.
+    if not np.isfinite(elbow_overlapping_span):
+        span_caveat = (
+            "The two curves cover different spans, and that difference has "
+            "not been separated from the difference in source here.")
+    elif elbow_overlapping_span == lo == hi:
+        span_caveat = (
+            "The two records cover different spans, so the meter sweep was "
+            "re-run over nothing but the dates PVOutput also covers: it "
+            f"still elbows at <strong>{elbow_overlapping_span:.1f} kWh</strong>. "
+            "The gap between the curves is therefore the channel, not the "
+            "calendar.")
+    else:
+        span_caveat = (
+            "The two records cover different spans. Re-run over nothing but "
+            "the dates PVOutput also covers, the meter elbows at "
+            f"<strong>{elbow_overlapping_span:.1f} kWh</strong> rather than "
+            f"<strong>{lo:.1f}</strong>, so part of the gap between the "
+            "curves is the calendar rather than the channel.")
+
     agreement = bounds_agreement_pct(meter_sweep, power_kw=power_kw)
     bounds_prose = (
         f"The two curves never separate by more than "
@@ -489,6 +557,10 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
         (capacity_stat, capacity_caption),
         (f"{covered_meter['import_kwh'].median():.2f} kWh",
          "median night consumption (meter)"),
+        # A reader could not previously tell from the page how much data is
+        # behind the headline. Both figures come from the frame being plotted,
+        # and an empty frame has no span to name rather than a NaT one.
+        (f"{len(covered_meter):,}", span_label),
         (f"{ev_share:.0f}%", "of covered nights are EV-charging"),
         (penalty_text,
          "resolution penalty, 15-minute vs finer simulation"),
@@ -542,7 +614,8 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
          "curve, drawn dashed and labelled: phase 2 is "
          "<strong>superseded</strong> because its consumption channel was "
          "faulty from <strong>December 2022</strong>, so it understates "
-         "night load and, with it, the capacity worth buying.",
+         "night load and, with it, the capacity worth buying. "
+         + span_caveat,
          chart_comparison(meter_sweep, pv_sweep)),
         ("Nights excluded from the analysis",
          _gap_prose(gaps, excluded_nights),
@@ -556,11 +629,14 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
     ev_note = (
         '<section class="card"><h2>How EV nights were identified</h2>'
         "<p>A night counts as EV-charging when its samples spend at least "
-        "some hours above a power threshold. This is re-derived here "
-        "because phase 2's rule — two hours above 2 kW — was fitted "
-        "against a signal that was missing much of the car; the threshold "
-        "that separated a partial signal is not necessarily the one that "
-        "separates a complete one. It remains a <strong>heuristic</strong>, "
+        "some hours above a power threshold. Phase 2's rule — two hours "
+        "above 2 kW — is <strong>retained unchanged</strong> and applied to "
+        "the meter. It was not re-derived: nothing here fits a threshold, "
+        "and an earlier version of this page wrongly said otherwise. The "
+        "reason it can be retained is in the table below — the split moves "
+        "with the threshold, but the recommended capacity does not, so the "
+        "choice does not have to be defended. It remains a "
+        "<strong>heuristic</strong>, "
         "not a measurement: the meter is whole-house and the car is not "
         "sub-metered. The table below shows how the split moves as the "
         "threshold moves, republished against the meter.</p>"

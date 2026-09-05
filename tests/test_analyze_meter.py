@@ -53,9 +53,9 @@ def _pair(dates, pv_wh, covered_pv, meter_kwh, covered_meter):
 def test_monthly_ratio_divides_summed_energy_not_averaged_ratios():
     """A heavy night must weigh more than a light one in the same month.
 
-    Averaging the two nights' ratios would give 0.75; summing the energy
-    first gives 9/11, which is the fraction of that month's load PVOutput
-    actually saw.
+    Averaging the two nights' ratios would give 0.694 (0.5 and 8/9); summing
+    the energy first gives 9/11 = 0.818, which is the fraction of that
+    month's load PVOutput actually saw.
     """
     me, pv = _pair(["2023-01-05", "2023-01-06"], [1_000.0, 8_000.0],
                    [True, True], [2.0, 9.0], [True, True])

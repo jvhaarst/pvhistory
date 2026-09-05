@@ -183,6 +183,32 @@ def _excluded_in_worst_gap_month(meter_nights_df: pd.DataFrame,
     return int((in_month & ~meter_nights_df["covered"]).sum()), str(g["month_name"])
 
 
+def elbow_on_overlapping_span(meter_df: pd.DataFrame, nights_df: pd.DataFrame,
+                              samples: pd.DataFrame,
+                              capacities_kwh: np.ndarray = CAPACITIES,
+                              power_kw: float = REPORT_POWER_KW) -> float:
+    """The meter's elbow, re-measured over PVOutput's own span.
+
+    The report puts the meter's capacity curve beside phase 2's and says the
+    difference between the two elbows is the *source*. That is only honest if
+    the difference is not the span instead: the meter record runs longer at
+    both ends. So the meter sweep is re-run over nothing but the dates
+    PVOutput also covers, and the elbow that comes back is published next to
+    the claim. Restricting is the cheap direction — phase 2 cannot be
+    extended to dates it has no data for.
+    """
+    lo = samples["ts_utc"].min()
+    hi = samples["ts_utc"].max()
+    m = meter_df[(meter_df["ts_utc"] >= lo) & (meter_df["ts_utc"] <= hi)]
+    n = nights_df[(nights_df["night_start_utc"] >= lo)
+                  & (nights_df["night_end_utc"] <= hi)]
+    if m.empty or n.empty or not n["covered"].any():
+        return float("nan")
+    sweep = meter_battery.sweep_bounds(m, n, capacities_kwh, (power_kw,))
+    return float(battery.elbow_capacity(
+        sweep[sweep["bound"] == "charge_first"], power_kw=power_kw))
+
+
 def run(repo_root: Path, out_dir: Path) -> dict:
     repo_root = Path(repo_root)
     out_dir = Path(out_dir)
@@ -209,6 +235,8 @@ def run(repo_root: Path, out_dir: Path) -> dict:
     pv_nights = _read_pv_nights(repo_root)
     pv_sweep = battery.sweep(samples, pv_nights, CAPACITIES, POWER_KWS)
 
+    elbow_overlap = elbow_on_overlapping_span(meter_df, nights_df, samples)
+
     ratio = monthly_ratio(nights_df, pv_nights)
     penalty = resolution_penalty_pct(samples, pv_nights, pv_sweep)
     excluded, worst_month_name = _excluded_in_worst_gap_month(nights_df, gaps)
@@ -221,6 +249,7 @@ def run(repo_root: Path, out_dir: Path) -> dict:
             ratio[["month", "ratio"]], gaps,
             resolution_penalty_pct=penalty,
             excluded_nights=excluded,
+            elbow_overlapping_span=elbow_overlap,
         )
     )
 
@@ -231,6 +260,7 @@ def run(repo_root: Path, out_dir: Path) -> dict:
         "median_night_kwh": float(covered["import_kwh"].median()),
         "elbow_charge_first_kwh": float(elbows["charge_first"]),
         "elbow_discharge_first_kwh": float(elbows["discharge_first"]),
+        "elbow_overlapping_span_kwh": float(elbow_overlap),
         "resolution_penalty_pct": float(penalty),
         "excluded_nights_worst_month": int(excluded),
         "worst_gap_month": worst_month_name,

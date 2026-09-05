@@ -80,8 +80,11 @@ def test_page_states_the_measured_resolution_penalty(toy):
 
 
 def test_page_discloses_the_january_2024_exclusions(toy):
+    # A bare `"12" in html` passed on the capacity axis and on "Capped at
+    # 12 kWh"; it never touched the exclusion count. Assert the count in the
+    # sentence that actually reports it.
     html = build_html(*toy, resolution_penalty_pct=4.2, excluded_nights=12)
-    assert "12" in html
+    assert "<strong>12</strong> nights from this analysis" in html
     assert "January 2024" in html or "2024-01" in html
 
 

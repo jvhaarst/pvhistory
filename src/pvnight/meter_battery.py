@@ -24,6 +24,18 @@ def bound_signals(meter_df: pd.DataFrame) -> dict[str, tuple[np.ndarray, np.ndar
     `discharge_first` meets the import before the export exists. Both
     reproduce the measured grid import exactly at zero capacity, which is what
     makes them a genuine bracket rather than two different questions.
+
+    **Each half-interval carries the full 15-minute power allowance**, so a
+    quarter hour recording both flows can move twice the inverter's energy
+    through it. This was measured rather than left as a worry: the doubling
+    can only bind where `min(import, cap) + min(export, cap)` exceeds the
+    cap, which is 455 of 233,358 intervals (0.195%) — not the 13.5% that
+    record both flows, because the rest are far too small to reach the cap
+    twice. Total excess allowance is 28 kWh over 6.67 years, 4.2 kWh/yr; at
+    9 kWh capacity it moves non-EV night import by 0.014%, and the elbow is
+    9.0 kWh with or without the correction. It inflates both orderings
+    equally, so the bracket is unaffected. Recorded so the next reader does
+    not have to re-derive it.
     """
     m = meter_df.sort_values("ts_utc")
     imp = m["import_kwh"].to_numpy(dtype=float) * 1000.0
