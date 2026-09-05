@@ -25,13 +25,55 @@ from .battery import (  # noqa: E402
 from .night_report import TABLE_CSS  # noqa: E402
 from .report import FURNITURE, SERIES, STYLE, _svg  # noqa: E402
 
-# The two within-interval orderings (spec S4.2). "charge_first" is the
-# favourable bound (the battery stores the export and spends it on the
-# import moments later); "discharge_first" is unfavourable (the import
-# arrives first, so only previously-stored energy can serve it). Neither is
-# the answer; the pair is the range.
-BOUND_LABEL = {"charge_first": "charge-first", "discharge_first": "discharge-first"}
+# The two within-interval orderings (spec S4.2). `charge_first` puts the
+# export before the import inside a quarter hour, `discharge_first` after.
+#
+# Neither is labelled favourable or unfavourable, and an earlier draft that
+# did so was wrong. Within a single interval charge-first can bridge more, so
+# the label looked safe — but state of charge couples the intervals, and
+# discharge-first empties a little of the battery before charging it, which
+# makes room to capture export that charge-first spills once the battery is
+# full. Measured across the whole record, discharge-first imports *less* at
+# every non-zero capacity. See `bounds_agreement_pct`: the two differ by at
+# most a fraction of a percent, which is the finding, not a caveat.
 BOUND_COLOUR = {"charge_first": SERIES[0], "discharge_first": SERIES[1]}
+
+
+def bounds_agreement_pct(meter_sweep: pd.DataFrame,
+                         power_kw: float = 3.0) -> float:
+    """Largest gap between the two orderings, as a percent of the baseline.
+
+    The baseline is grid import at zero capacity, which both orderings
+    reproduce exactly — that shared point is what makes them a bracket. The
+    return value answers the question the bracket was built to answer: how
+    much can the unknowable within-interval ordering move the answer?
+    """
+    d = meter_sweep[meter_sweep["power_kw"] == power_kw]
+    cf = d[d["bound"] == "charge_first"].sort_values("capacity_kwh")
+    df_ = d[d["bound"] == "discharge_first"].sort_values("capacity_kwh")
+    if cf.empty or df_.empty:
+        return float("nan")
+    baseline = float(cf["grid_import_kwh_yr"].iloc[0])
+    gap = np.abs(cf["grid_import_kwh_yr"].to_numpy()
+                 - df_["grid_import_kwh_yr"].to_numpy()).max()
+    return float(100.0 * gap / baseline) if baseline else float("nan")
+
+
+def format_penalty_pct(pct: float) -> str:
+    """One rendering of the resolution penalty, for every place that shows it.
+
+    The stat tile and the card used to format it independently at one decimal
+    place, which printed a measured -0.016% as "-0.0%" and let the page
+    disagree with the README. Decimals scale with the magnitude so a non-zero
+    measurement never rounds away to zero, and the sign is always shown: the
+    coarser simulation can land on either side of the finer one.
+    """
+    if not np.isfinite(pct):
+        return "not measured"
+    if pct == 0.0:
+        return "0%"
+    decimals = int(np.clip(np.ceil(-np.log10(abs(pct))) + 1, 1, 4))
+    return f"{pct:+.{decimals}f}%"
 
 
 # ---------------------------------------------------------------------------
@@ -114,8 +156,9 @@ def chart_bounds(meter_sweep: pd.DataFrame, elbow_charge_first: float,
                   elbow_discharge_first: float) -> str:
     """Night grid import against capacity for both orderings.
 
-    The shaded band between the two lines is the answer; the report treats
-    neither edge as a point estimate.
+    The band between the two lines is what the unknowable within-interval
+    ordering can move; on this record it is thin enough to be hard to see,
+    which is the result rather than a drawing problem.
     """
     fig, ax = plt.subplots(figsize=(9, 4))
     d = _bound_pair(meter_sweep)
@@ -123,9 +166,9 @@ def chart_bounds(meter_sweep: pd.DataFrame, elbow_charge_first: float,
                      d.nonev_night_grid_import_kwh_yr_df, color=SERIES[2],
                      alpha=0.2, label="range between bounds")
     ax.plot(d.capacity_kwh, d.nonev_night_grid_import_kwh_yr_cf, lw=2,
-            color=BOUND_COLOUR["charge_first"], label="charge-first (favourable)")
+            color=BOUND_COLOUR["charge_first"], label="charge-first")
     ax.plot(d.capacity_kwh, d.nonev_night_grid_import_kwh_yr_df, lw=2,
-            color=BOUND_COLOUR["discharge_first"], label="discharge-first (unfavourable)")
+            color=BOUND_COLOUR["discharge_first"], label="discharge-first")
     ax.axvline(elbow_charge_first, color=BOUND_COLOUR["charge_first"], ls="--", lw=1)
     ax.axvline(elbow_discharge_first, color=BOUND_COLOUR["discharge_first"], ls="--", lw=1)
     ax.set_xlabel("battery capacity (kWh, nameplate)")
@@ -282,7 +325,7 @@ def _elbow_stability_table(charge_first_sweep: pd.DataFrame, power_kw: float = 3
     )
 
 
-def _gap_summary(gaps: pd.DataFrame) -> dict | None:
+def gap_summary(gaps: pd.DataFrame) -> dict | None:
     """The facts behind the outage sentence and the stat tile, read once
     from ``gaps`` so the two never drift apart. ``None`` when there are no
     gaps to summarise.
@@ -322,7 +365,7 @@ def _gap_prose(gaps: pd.DataFrame, excluded_nights: int) -> str:
     text, so it could (and did) disagree with whatever ``gaps`` frame was
     actually passed in. Every number here is read from the frame instead.
     """
-    g = _gap_summary(gaps)
+    g = gap_summary(gaps)
     if g is None:
         return (
             "Nights are dropped, not treated as low-consumption, whenever "
@@ -390,21 +433,64 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
     covered_meter = meter_nights[meter_nights["covered"]]
     ev_share = (100.0 * covered_meter["is_ev"].sum() / len(covered_meter)
                 if len(covered_meter) else float("nan"))
-    gap_summary = _gap_summary(gaps)
+    gaps_info = gap_summary(gaps)
     excluded_label = (
-        f"nights excluded around the {gap_summary['month_name']} outage"
-        if gap_summary is not None
+        f"nights excluded around the {gaps_info['month_name']} outage"
+        if gaps_info is not None
         else "nights excluded for missing meter intervals"
     )
 
+    # The bracket can collapse: if both orderings elbow at the same capacity,
+    # "9.0–9.0 kWh" is a range only typographically. Say the actual finding.
+    degenerate = lo == hi
+    capacity_stat = (f"{lo:.1f} kWh" if degenerate else f"{lo:.1f}–{hi:.1f} kWh")
+    capacity_caption = (
+        "recommended capacity, the same under both within-interval orderings"
+        if degenerate else
+        "recommended capacity, range across the charge-first / "
+        "discharge-first bounds")
+    penalty_text = format_penalty_pct(resolution_penalty_pct)
+
+    # How the penalty should be read depends on its size, so the sentence
+    # branches rather than asserting one interpretation for every value.
+    # A tenth of a percent is the scale at which this measurement's own
+    # arbitrary choices (which quarter hour a boundary sample joins, where
+    # the record is truncated) move the answer, so below that it says
+    # nothing.
+    penalty_reading = (
+        " — below a tenth of a percent, which is the scale at which this "
+        "measurement's own boundary choices move it, so it is not usefully "
+        "distinguishable from zero. It is stated because it was measured, "
+        "not because it is large. Near zero is what the mechanism predicts: "
+        "at night there is no generation to cancel against load inside an "
+        "interval, and a power cap in kW binds at the same rate however "
+        "long the interval is, so coarsening can only blur short peaks and "
+        "daytime charging."
+        if abs(resolution_penalty_pct) < 0.1 else
+        " — the recommended capacity above already carries this cost, since "
+        "the meter itself only records at 15 minutes."
+    )
+
+    agreement = bounds_agreement_pct(meter_sweep, power_kw=power_kw)
+    bounds_prose = (
+        f"The two curves never separate by more than "
+        f"<strong>{agreement:.2f}%</strong> of the grid import the house "
+        "actually paid for, and "
+        + (f"they elbow at the same capacity, <strong>{lo:.1f} kWh</strong>. "
+           "The ordering the meter cannot record therefore does not change "
+           "the answer — which is what running both bounds was for."
+           if degenerate else
+           f"they elbow at <strong>{lo:.1f}</strong> and "
+           f"<strong>{hi:.1f} kWh</strong>, so the recommended capacity is "
+           "reported as that range rather than a single number.")
+    )
+
     stats = [
-        (f"{lo:.1f}–{hi:.1f} kWh",
-         "recommended capacity, range across the charge-first / "
-         "discharge-first bounds"),
+        (capacity_stat, capacity_caption),
         (f"{covered_meter['import_kwh'].median():.2f} kWh",
          "median night consumption (meter)"),
         (f"{ev_share:.0f}%", "of covered nights are EV-charging"),
-        (f"{resolution_penalty_pct:.1f}%",
+        (penalty_text,
          "resolution penalty, 15-minute vs finer simulation"),
         (f"{excluded_nights}", excluded_label),
     ]
@@ -416,10 +502,10 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
          "PVOutput's consumption channel is cross-checked against the "
          "smart meter every month across the whole record. The ratio holds "
          "near 1.0 through November 2022, then steps down in "
-         "<strong>December 2022</strong> and never recovers — evidence of "
-         "a hardware fault, not a gradual drift, and the reason phase 2's "
-         "battery recommendation is now <strong>superseded</strong> for "
-         "any period after that step.",
+         "<strong>December 2022</strong> and never recovers, drifting "
+         "further down year by year after the step — a discrete fault that "
+         "then worsens, and the reason phase 2's battery recommendation is "
+         "now <strong>superseded</strong> for any period after that step.",
          chart_visible_fraction(monthly_ratio)),
         ("What a night actually costs, both ways",
          "Night-energy distributions from the meter and from PVOutput, "
@@ -428,18 +514,19 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
          "meter's — the same fault chart one shows, expressed as missed "
          "energy rather than a ratio.",
          chart_night_distribution(meter_nights, pv_nights)),
-        ("How much capacity is worth buying, as a range",
+        ("How much capacity is worth buying, and how little the ordering "
+         "matters",
          "The meter cannot tell which of a quarter-hour's import and "
          "export happened first, so every capacity is simulated under both "
          f"orderings: <strong>charge-first</strong> ({elbow_cf:.1f} kWh, "
-         "favourable — the battery banks the export and spends it on the "
-         "import moments later) and <strong>discharge-first</strong> "
-         f"({elbow_df:.1f} kWh, unfavourable — the import arrives first, "
-         "so only energy already stored can serve it). Neither bound is "
-         "the answer; the shaded band between them is. The recommended "
-         f"capacity is therefore reported as a range, "
-         f"<strong>{lo:.1f}–{hi:.1f} kWh</strong>, never a single "
-         "number.",
+         "the export banked before the import is served) and "
+         f"<strong>discharge-first</strong> ({elbow_df:.1f} kWh, the "
+         "import served before the export exists). Neither is favourable "
+         "or unfavourable — within one interval charge-first bridges more, "
+         "but state of charge couples the intervals, and discharging first "
+         "makes room to capture export that would otherwise be spilled, so "
+         "on this record discharge-first ends up marginally ahead. "
+         + bounds_prose,
          chart_bounds(meter_sweep, elbow_cf, elbow_df)),
         ("Where the marginal kWh stops paying, both bounds",
          "Marginal return for household (non-EV) nights, both orderings. "
@@ -482,15 +569,13 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
     resolution_note = (
         '<section class="card"><h2>The resolution penalty</h2>'
         "<p>Averaging over 15 minutes hides short peaks, so a battery "
-        "simulated at that resolution looks better than reality. Rather "
-        "than assume a size for this effect, it is measured directly: "
-        "phase 2's own finer PVOutput data is downsampled to the "
-        "<strong>15-minute</strong> interval the meter is stuck with, and "
-        "the sweep is re-run. The measured penalty is "
-        f"<strong>{resolution_penalty_pct:.1f}%</strong> against the "
-        "15-minute interval — the recommended capacity above already "
-        "carries this cost, since the meter itself only records at 15 "
-        "minutes.</p></section>")
+        "simulated at that resolution might look better than reality. "
+        "Rather than assume a size for this effect, it is measured "
+        "directly: phase 2's own finer PVOutput data is aggregated onto "
+        "the <strong>15-minute</strong> boundaries the meter keeps, and "
+        "the sweep is re-run. The measured difference is "
+        f"<strong>{penalty_text}</strong> of the 15-minute figure"
+        + penalty_reading + "</p></section>")
 
     return (
         "<title>Night Consumption, Measured at the Meter</title>"

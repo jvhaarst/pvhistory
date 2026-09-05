@@ -1,6 +1,8 @@
+import numpy as np
 import pandas as pd
 import pytest
 
+import analyze_meter
 from analyze_meter import run
 
 
@@ -37,3 +39,60 @@ def test_resolution_penalty_is_measured_and_plausible(tmp_path, repo_root):
     the finer one, and the gap should be single-digit percent."""
     s = run(repo_root, tmp_path)
     assert -1.0 <= s["resolution_penalty_pct"] <= 25.0
+
+
+def _pair(dates, pv_wh, covered_pv, meter_kwh, covered_meter):
+    """Matched PVOutput and meter night frames, with a known ratio."""
+    pv = pd.DataFrame({"date": pd.to_datetime(dates), "night_wh": pv_wh,
+                       "covered": covered_pv})
+    me = pd.DataFrame({"date": pd.to_datetime(dates), "import_kwh": meter_kwh,
+                       "covered": covered_meter})
+    return me, pv
+
+
+def test_monthly_ratio_divides_summed_energy_not_averaged_ratios():
+    """A heavy night must weigh more than a light one in the same month.
+
+    Averaging the two nights' ratios would give 0.75; summing the energy
+    first gives 9/11, which is the fraction of that month's load PVOutput
+    actually saw.
+    """
+    me, pv = _pair(["2023-01-05", "2023-01-06"], [1_000.0, 8_000.0],
+                   [True, True], [2.0, 9.0], [True, True])
+    out = analyze_meter.monthly_ratio(me, pv)
+
+    assert len(out) == 1
+    assert out["ratio"].iloc[0] == pytest.approx(9.0 / 11.0)
+
+
+def test_monthly_ratio_drops_a_night_either_source_calls_unusable():
+    """Coverage is required on both sides, so a night present in only one
+    frame cannot inflate or deflate the month it lands in."""
+    me, pv = _pair(["2023-03-01", "2023-03-02", "2023-03-03"],
+                   [1_000.0, 5_000.0, 1_000.0], [True, True, False],
+                   [2.0, 5.0, 2.0], [True, False, True])
+    out = analyze_meter.monthly_ratio(me, pv)
+
+    # Only 2023-03-01 survives: the second night fails on the meter side, the
+    # third on PVOutput's.
+    assert out["meter_kwh"].iloc[0] == pytest.approx(2.0)
+    assert out["ratio"].iloc[0] == pytest.approx(0.5)
+
+
+def test_monthly_ratio_refuses_to_publish_an_empty_comparison():
+    me, pv = _pair(["2023-01-05"], [1_000.0], [False], [2.0], [True])
+    with pytest.raises(ValueError, match="no nights are usable in both"):
+        analyze_meter.monthly_ratio(me, pv)
+
+
+def test_pv_shortfall_weighs_months_by_energy():
+    """A near-perfect quiet month must not offset a badly-wrong heavy one."""
+    ratio = pd.DataFrame({
+        "month": pd.PeriodIndex(["2024-01", "2024-07"], freq="M"),
+        "pv_kwh": [75.0, 10.0], "meter_kwh": [100.0, 10.0],
+    })
+    # 85 of 110 kWh seen -> 22.7% short, not the 12.5% a mean of the two
+    # monthly ratios would report.
+    assert analyze_meter.pv_shortfall_pct(ratio, 2024) == pytest.approx(
+        100.0 * (1.0 - 85.0 / 110.0))
+    assert np.isnan(analyze_meter.pv_shortfall_pct(ratio, 2019))

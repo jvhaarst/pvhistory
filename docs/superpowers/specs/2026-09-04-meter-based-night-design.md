@@ -143,10 +143,25 @@ Two orderings bracket it, and both are simulated:
 
 - **charge-first** — each interval becomes `+export` then `−import`. The
   battery stores the exported energy and spends it on the import moments
-  later. Maximum bridging; the **favourable** bound.
+  later. Maximum bridging *within the interval*.
 - **discharge-first** — `−import` then `+export`. The import arrives before
   the export is available, so only previously-stored energy can serve it.
-  Minimum bridging; the **unfavourable** bound.
+  Minimum bridging *within the interval*.
+
+**Neither is the favourable bound, and an earlier version of this section
+said otherwise.** The within-interval reasoning above is correct and does not
+settle it: state of charge couples the intervals to each other. Discharging
+first empties a little of the battery before charging it, which makes room to
+capture export that charge-first spills once the battery is full — and on the
+real record that outweighs the bridging advantage, so discharge-first imports
+*less* at all 60 non-zero capacities in the sweep, by 2.74 kWh/yr at 0.5 kWh
+decaying to 0.05 kWh/yr at 30 kWh.
+
+The measured result is that **the ordering does not matter**: the two curves
+differ by at most 0.06% of the grid import the house actually paid for, and
+both elbow at the same 9.0 kWh. That is what running both bounds was for —
+establishing that an unrecordable detail cannot move the answer — and it
+should be reported as a result, not carried as a caveat.
 
 Each step carries the full 15-minute power allowance, which is mildly
 optimistic for both.

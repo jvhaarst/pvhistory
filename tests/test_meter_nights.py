@@ -72,7 +72,7 @@ def test_real_data_night_totals_agree_with_pvoutput_before_the_fault(nights, rep
 
 
 def test_real_data_shows_the_known_divergence_after_the_fault(nights, repo_root):
-    """Spec §7 test 2. 2023/2024/2025 shortfalls measured at 24.9/26.7/30.8%.
+    """Spec §7 test 2. 2023/2024/2025 shortfalls measured at 24.9/27.6/30.8%.
     Assert 20-35% per year — wide enough that 24.9 is not on a cliff edge,
     narrow enough that the fault must still be there."""
     pv = pd.read_csv(repo_root / "out" / "night_summary.csv", parse_dates=["date"])

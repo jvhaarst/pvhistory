@@ -41,9 +41,18 @@ def _toy_meter():
     return pd.DataFrame({"ts_utc": ts, "import_kwh": imp, "export_kwh": exp})
 
 
-def test_charge_first_never_gives_a_worse_result_than_discharge_first():
-    """The two orderings bracket what a battery could bridge within an
-    interval, so the favourable ordering must never import more."""
+def test_charge_first_bridges_more_while_the_battery_still_has_room():
+    """Charge-first wins only while the battery is not full.
+
+    With room to spare, putting the export first lets the same interval's
+    import be served from it; discharge-first must buy that import from the
+    grid because the export does not exist yet. This toy series never fills
+    the battery, so that advantage is the whole story here.
+
+    It is NOT the general case — see the companion test below. An earlier
+    version of this test asserted the ordering unconditionally and passed
+    for exactly this reason, while the real record does the opposite.
+    """
     m = _toy_meter()
     n = pd.DataFrame([{
         "date": m.ts_utc.iloc[0].date(),
@@ -56,6 +65,55 @@ def test_charge_first_never_gives_a_worse_result_than_discharge_first():
     assert (charge_first.grid_import_kwh_yr.to_numpy()
             <= discharge_first.grid_import_kwh_yr.to_numpy() + 1e-9).all()
 
+
+def _filling_meter():
+    """Six days of a battery that reaches full while export is still arriving.
+
+    Mornings export hard with nothing to consume, which fills the battery.
+    Afternoons then record both flows with import exceeding export — the
+    situation where the orderings genuinely differ — and nights draw the
+    battery back down.
+    """
+    ts = pd.date_range("2023-06-01", periods=96 * 6, freq="15min", tz="UTC")
+    h = ts.hour.to_numpy()
+    fill = (h >= 9) & (h < 11)
+    mixed = (h >= 11) & (h < 18)
+    night = (h >= 20) | (h < 6)
+    imp = np.where(fill, 0.0, np.where(mixed, 0.40, np.where(night, 0.20, 0.05)))
+    exp = np.where(fill, 0.75, np.where(mixed, 0.20, 0.0))
+    rows = []
+    for d in pd.unique(ts.date):
+        s = pd.Timestamp(d, tz="UTC") + pd.Timedelta(hours=20)
+        rows.append({"date": d, "night_start_utc": s,
+                     "night_end_utc": s + pd.Timedelta(hours=8),
+                     "is_ev": False, "covered": True})
+    return (pd.DataFrame({"ts_utc": ts, "import_kwh": imp, "export_kwh": exp}),
+            pd.DataFrame(rows))
+
+
+def test_the_ordering_reverses_once_the_battery_fills():
+    """Discharge-first wins when the battery is full, and that is why the
+    two bounds are not a favourable/unfavourable pair.
+
+    On a full battery, charge-first spills the export and then discharges to
+    serve the import. Discharge-first serves the import first, which frees
+    exactly that much room, and then absorbs export into it. It ends the
+    interval holding more, so it imports less later. State of charge couples
+    the intervals, which the within-interval reasoning cannot see.
+
+    This is the direction the real meter record takes at every non-zero
+    capacity, by a margin under 0.1% of baseline import.
+    """
+    m, n = _filling_meter()
+    out = sweep_bounds(m, n, np.arange(0.0, 6.1, 0.5), power_kws=(3.0,))
+    charge_first = out[out.bound == "charge_first"].sort_values("capacity_kwh")
+    discharge_first = out[out.bound == "discharge_first"].sort_values("capacity_kwh")
+    diff = (discharge_first.grid_import_kwh_yr.to_numpy()
+            - charge_first.grid_import_kwh_yr.to_numpy())
+    assert (diff < -1e-9).any(), (
+        "no capacity where discharge-first imports less — the fixture stopped "
+        "filling the battery, so it no longer characterises the reversal")
+    assert diff[0] == pytest.approx(0.0), "the two must agree at zero capacity"
 
 def test_both_orderings_reproduce_the_measured_import_at_zero_capacity():
     """The property that makes these a bracket rather than two different

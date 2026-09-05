@@ -98,33 +98,52 @@ def resolution_penalty_pct(
     """How much better a 15-minute simulation looks than a 5-minute one.
 
     Measured, not asserted. Phase 2's PVOutput data genuinely exists at both
-    resolutions: its five-minute net signal is summed in consecutive threes
-    into fifteen-minute totals, the same capacity sweep is run over each, and
-    the two are read at the *five-minute* elbow — the finer run is the truth
-    the coarser one is being scored against.
+    resolutions: its five-minute net signal is aggregated onto the meter's own
+    quarter-hour boundaries, the same capacity sweep is run over each, and the
+    two are read at the *five-minute* elbow — the finer run is the truth the
+    coarser one is being scored against.
 
     Returned as a percentage of the fifteen-minute figure, because fifteen
     minutes is what the meter records: the number says how much the meter-
     based answer flatters itself.
 
-    Summing consecutive threes joins across the twenty places where PVOutput
-    skipped a sample (of 589,428 intervals), which shifts those three groups
-    off the clock. At that rate it cannot move the result, and it is what
-    makes the two runs the same energy rather than the same clock.
+    Grouping is by ``floor("15min")`` on the timestamp, not by reshaping the
+    array in threes, and the difference is not cosmetic. PVOutput's record
+    starts at 03:40, so a reshape from index 0 puts 192,984 of 196,477 groups
+    on a boundary ten minutes off the clock the meter keeps, and additionally
+    merges across the twenty places where PVOutput skipped samples — one such
+    "quarter hour" spans 13h45. Measured at the elbow, the four phasings give
+    +0.0800% (reshape from 0), -0.0096% (from 1), -0.0117% (from 2) and
+    -0.0163% (clock-aligned). The spread is 0.10 pp and the sign flips, which
+    is larger than the quantity being measured — so the phase is not a detail,
+    and the only defensible choice is the meter's own boundaries.
     """
     s = samples.sort_values("ts_utc").reset_index(drop=True)
+    # net_wh maps a NaN consumption reading to 0.0, so the sums below cannot
+    # be NaN-poisoned the way phase 2's prefix sum was. That guarantee rests
+    # on generation never being NaN (loader fillna(0.0)s it) — assert it here
+    # rather than depend on it silently.
+    assert not s["power_gen_w"].isna().any(), "generation must not be NaN"
     net = battery.net_wh(s)
     night, nonev, month = battery.build_masks(s, pv_nights)
 
-    k = SAMPLES_PER_METER_INTERVAL
-    n = (len(net) // k) * k
-    net_15 = net[:n].reshape(-1, k).sum(axis=1)
-    # Majority vote: a coarse interval belongs to the night that owns most of
-    # it. Only the two intervals at each night's edge can differ from `any`
-    # or `all`, out of the ~190 in a night.
-    night_15 = night[:n].reshape(-1, k).mean(axis=1) >= 0.5
-    nonev_15 = nonev[:n].reshape(-1, k).mean(axis=1) >= 0.5
-    month_15 = month[:n].reshape(-1, k)[:, 0]
+    grouped = pd.DataFrame({
+        "quarter": pd.DatetimeIndex(s["ts_utc"]).floor(
+            f"{int(SAMPLES_PER_METER_INTERVAL * 5)}min"),
+        "net": net, "night": night, "nonev": nonev, "month": month,
+    }).groupby("quarter", sort=True).agg(
+        # Majority vote for the masks: a coarse interval belongs to the night
+        # that owns most of it. Only the interval at each night's edge can
+        # differ from `any` or `all`, out of the ~65 in a night. `mean` also
+        # does the right thing for the short groups at a data gap, where a
+        # fixed divisor of three would not.
+        net=("net", "sum"), night=("night", "mean"),
+        nonev=("nonev", "mean"), month=("month", "first"),
+    )
+    net_15 = grouped["net"].to_numpy()
+    night_15 = (grouped["night"] >= 0.5).to_numpy()
+    nonev_15 = (grouped["nonev"] >= 0.5).to_numpy()
+    month_15 = grouped["month"].to_numpy()
 
     span = (s["ts_utc"].iloc[-1] - s["ts_utc"].iloc[0]).total_seconds()
     years = span / (365.25 * 24 * 3600)
@@ -156,7 +175,7 @@ def _excluded_in_worst_gap_month(meter_nights_df: pd.DataFrame,
     cannot drift apart — an earlier round of this project spent a whole fix
     removing a hardcoded "January 2024" from the prose.
     """
-    g = compare_report._gap_summary(gaps)
+    g = compare_report.gap_summary(gaps)
     if g is None:
         return 0, ""
     ym = pd.to_datetime(meter_nights_df["date"]).dt.to_period("M")
