@@ -58,6 +58,7 @@ def simulate(
     nonev_mask: np.ndarray,
     month_idx: np.ndarray,
     spec: BatterySpec,
+    dt_hours: float = DT_HOURS,
 ) -> SimResult:
     """Run the whole timeline once for every capacity in `spec`.
 
@@ -70,7 +71,10 @@ def simulate(
     caps = spec.usable_wh
     n = len(caps)
     eta = spec.eta
-    limit_wh = spec.power_kw * 1000.0 * DT_HOURS
+    # The interval length is a parameter because the meter data is 15-minute
+    # where PVOutput is 5-minute. The power cap converts to an energy limit
+    # per interval, so it is the one place resolution genuinely bites.
+    limit_wh = spec.power_kw * 1000.0 * dt_hours
 
     stored = np.zeros(n)
     charge = np.zeros(n)
@@ -329,6 +333,12 @@ def elbow_stability(
     because the chord it measures against is drawn to that endpoint. On this
     installation it reads 6.0 kWh from a 0-10 kWh sweep and settles at 8.0
     once the sweep reaches 25 kWh and the top end has gone flat.
+
+    Settling is not guaranteed, and the caller must not assume it. On phase
+    3's meter-based curve the same table reads 8.5 at 25 and 9.0 at 30 and
+    keeps climbing past the published range — a flat top-end marginal return
+    is not sufficient for the elbow to have stopped moving. Read the last two
+    rows rather than trusting the top-end column.
 
     Publishing this table is the honest alternative to claiming an
     independence the method does not have. A reader can see for themselves

@@ -16,10 +16,10 @@
 
 - **No phase-1 module may be modified**: `src/pvnight/{config,loader,solar,events,envelope,report}.py`, `analyze.py`.
 - **Of phase 2, only `battery.py` changes**, and only additively: `simulate` gains a `dt_hours` keyword defaulting to the existing `DT_HOURS`. `nights.py`, `night_report.py` and `analyze_night.py` are read-only. Phase 2's numbers must not move.
-- **Meter facts, all measured** (spec §2.3): 15-minute intervals; every column reads as a **string**, including the timestamp; **decimal comma**; the paired tariff columns are null when the other tariff is active, so fill zero and sum the pair; timestamps label the interval **end**; 233,358 rows spanning 2019-12-31 23:15 UTC → 2026-09-03 22:00 UTC; **686 missing intervals in seven gaps**, five of them in January 2024.
+- **Meter facts, all measured** (spec §2.3): 15-minute intervals; every column reads as a **string**, including the timestamp; **decimal comma**; the paired tariff columns are null when the other tariff is active, so fill zero and sum the pair; timestamps label the interval **end**; 233,358 rows spanning 2019-12-31 23:15 UTC → 2026-09-03 22:00 UTC; **686 missing intervals in seven gaps**, four of them in January 2024.
 - **Night consumption is meter import** over the night window. Generation is zero at night, so import *is* household consumption.
 - **Daytime surplus is meter export.**
-- **Both bounds are run**, never one: `net` (export − import per interval) understates what a battery could do; `gross` (both flows separately) overstates. Report the range, invent no midpoint.
+- **Both bounds are run**, never one. Each interval is split into two steps: `charge_first` is `+export` then `−import` (maximum bridging, favourable); `discharge_first` is `−import` then `+export` (minimum bridging, unfavourable). Both reproduce the measured grid import exactly at zero capacity. Report the range, invent no midpoint.
 - **No cut-off is introduced.** Phase 2 removed its 50 kWh/yr threshold as a judgement call; the elbow, benefit-share, convergence and elbow-stability readings carry over.
 - Battery parameters unchanged from phase 2: round trip 0.90 split as `sqrt(0.90)` each way, usable fraction 0.90, power caps 2.5 / 3.0 / 3.7 kW, capacities 0–30 kWh in 0.5 kWh steps.
 - Never assert an exact datetime resolution (pandas 3.x gives microseconds).
@@ -124,13 +124,13 @@ def test_tariff_pairs_are_summed_not_dropped(meter):
 
 
 def test_find_gaps_reports_all_seven(meter):
-    """Spec §2.3 lists seven, five of them in January 2024. They must be
+    """Spec §2.3 lists seven, four of them in January 2024. They must be
     reported, never silently interpolated."""
     g = find_gaps(meter)
     assert len(g) == 7
     assert int(g["missing_intervals"].sum()) == 686
     jan24 = g[g["gap_start_utc"].dt.strftime("%Y-%m") == "2024-01"]
-    assert len(jan24) == 5
+    assert len(jan24) == 4     # the fifth 2024 gap is in July
     biggest = g.loc[g["missing_intervals"].idxmax()]
     assert biggest["gap_start_utc"] == pd.Timestamp("2024-01-08T23:00:00Z")
 
@@ -217,7 +217,7 @@ def load_meter(meter_dir: Path) -> pd.DataFrame:
 def find_gaps(frame: pd.DataFrame) -> pd.DataFrame:
     """Every run of missing intervals, reported rather than interpolated.
 
-    Five of the seven gaps fall in January 2024 and together remove most of
+    Four of the seven gaps fall in January 2024 and together remove most of
     8-19 January — midwinter, when night consumption peaks. A night touching
     one of these must be excluded, not counted as a quiet night.
     """
@@ -245,7 +245,7 @@ git commit -m "Add smart-meter loader
 
 Every column arrives as text with a decimal comma, and the paired tariff
 columns are null when the other tariff is active. Gaps are reported, not
-interpolated: five of the seven fall in January 2024."
+interpolated: four of the seven fall in January 2024."
 ```
 
 ---
@@ -374,7 +374,7 @@ def test_the_december_2022_step_is_visible(nights, repo_root):
 
 
 def test_january_2024_outage_removes_nights_rather_than_shrinking_them(nights):
-    """Five gaps remove most of 8-19 January 2024. Those nights must be
+    """Four gaps remove most of 8-19 January 2024. Those nights must be
     excluded, not counted as unusually quiet midwinter nights."""
     jan = nights[(nights["date"] >= "2024-01-08") & (nights["date"] <= "2024-01-19")]
     assert len(jan) > 0
@@ -545,7 +545,7 @@ step as regression tests: the fault is a fact about the data."
 - Produces:
   - `battery.simulate(net_wh, night_mask, nonev_mask, month_idx, spec, dt_hours=DT_HOURS)` — additive keyword.
   - `meter_battery.bound_signals(meter_df) -> tuple[np.ndarray, np.ndarray]` — `(net_wh, gross_wh)`; `net` is `(export − import) * 1000`, `gross` is the same but with import and export treated as separable within the interval.
-  - `meter_battery.sweep_bounds(meter_df, nights_df, capacities_kwh, power_kws=(2.5, 3.0, 3.7)) -> pd.DataFrame` — phase 2's sweep columns plus a `bound` column of `"net"` or `"gross"`.
+  - `meter_battery.sweep_bounds(meter_df, nights_df, capacities_kwh, power_kws=(2.5, 3.0, 3.7)) -> pd.DataFrame` — phase 2's sweep columns plus a `bound` column of `"charge_first"` or `"discharge_first"`.
 
 **On the two bounds.** A 15-minute interval can contain both import and export (13.5% do). The `net` signal collapses them, so a battery never sees the export it could have stored — an understatement. The `gross` signal presents the export for charging and the import for discharging in the same interval, which a real battery could partly do — an overstatement. The truth is between; both are run and neither is called the answer.
 
@@ -1112,7 +1112,7 @@ confirmed unless it appears in output you have seen.
 - **Phase 2's numbers must not move.** The only change to its code is an
   additive keyword with the old value as default. Task 3 step 6 checks this
   explicitly; if it fails, stop rather than adjusting phase 2's tests.
-- **The gaps are not noise.** Five of seven fall in January 2024 and remove
+- **The gaps are not noise.** Four of the seven fall in January 2024 and remove
   most of 8-19 January. Nights touching them are excluded, and the report says
   how many. Treating them as low-consumption nights would understate midwinter
   demand — the season that already dominates the answer.

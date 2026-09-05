@@ -46,7 +46,7 @@ declines year on year, which fits a lost phase whose share of load is
 |---|---|
 | Solar window (phase 1) | **Sound.** Generation-only; generation is measured well throughout. |
 | The night-extraction method | **Sound.** Agrees with an independent meter to within 2% for 2020–2021 — a genuine external validation. |
-| Night consumption 2023+ | **Understated by 24.9% (2023), 26.7% (2024), 30.8% (2025)**, as a ratio of annual totals. |
+| Night consumption 2023+ | **Understated by 24.9% (2023), 27.6% (2024), 30.8% (2025)**, as a ratio of annual totals. (The 2024 figure was 26.7% in the pre-build estimate; the build measured 27.55% against the full record.) |
 | EV nights specifically | **Worst affected.** For 2023+, ordinary nights are short by a median 1.17 kWh, EV nights by 11.39 kWh against a 34.55 kWh true figure. In 2021–22 the same split shows 0.10 and 0.34 kWh. |
 | Phase 2's EV classifier | **Read a partial signal.** Its 72 nights are the charging that leaked through; more was never visible. |
 | Phase 2's battery recommendation (6.5–9 kWh) | **Probably too small**, sized against a night load materially too low. |
@@ -83,8 +83,8 @@ declines year on year, which fits a lost phase whose share of load is
   | 2024-01-18 23:00 | 2 h 15 m |
   | 2024-07-19 07:45 | 2 h 45 m |
 
-  Five of the seven fall in **January 2024**, together removing most of
-  8–19 January — midwinter, when night consumption is at its annual peak. Any
+  Four of the seven fall in **January 2024**, together removing most of
+  8–19 January (the fifth 2024 gap is in July) — midwinter, when night consumption is at its annual peak. Any
   2024 figure must exclude affected nights rather than treat them as low
   ones, and the report must say how many nights that removes.
 - **31,528 intervals (13.5%) carry both import and export.** §4.2 turns this
@@ -133,18 +133,50 @@ definitions coincide exactly where this analysis needs them to.
 Daytime surplus is **meter export**: energy that demonstrably had nowhere to
 go, which is precisely what a battery could have captured.
 
-### 4.2 The both-flows bound
+### 4.2 The within-interval ordering bounds
 
 13.5% of intervals record both import and export, because a quarter hour is
-long enough to do both.
+long enough to do both. The meter cannot say which came first, and that
+ordering decides how much a battery could have bridged.
 
-- Simulating on `net = export − import` assumes the battery could not have
-  caught both within the interval. This **understates** what it could do.
-- Simulating on the two flows separately assumes it caught both. This
-  **overstates**.
+Two orderings bracket it, and both are simulated:
 
-Both are run and the pair is reported as a range. Neither is presented as the
-answer, and no midpoint is invented.
+- **charge-first** — each interval becomes `+export` then `−import`. The
+  battery stores the exported energy and spends it on the import moments
+  later. Maximum bridging *within the interval*.
+- **discharge-first** — `−import` then `+export`. The import arrives before
+  the export is available, so only previously-stored energy can serve it.
+  Minimum bridging *within the interval*.
+
+**Neither is the favourable bound, and an earlier version of this section
+said otherwise.** The within-interval reasoning above is correct and does not
+settle it: state of charge couples the intervals to each other. Discharging
+first empties a little of the battery before charging it, which makes room to
+capture export that charge-first spills once the battery is full — and on the
+real record that outweighs the bridging advantage, so discharge-first imports
+*less* at all 60 non-zero capacities in the sweep, by 2.74 kWh/yr at 0.5 kWh
+decaying to 0.05 kWh/yr at 30 kWh.
+
+The measured result is that **the ordering does not matter**: the two curves
+differ by at most 0.06% of the grid import the house actually paid for, and
+both elbow at the same 9.0 kWh. That is what running both bounds was for —
+establishing that an unrecordable detail cannot move the answer — and it
+should be reported as a result, not carried as a caveat.
+
+Each step carries the full 15-minute power allowance, which is mildly
+optimistic for both.
+
+**A rejected earlier formulation, recorded because it is the obvious one.**
+Collapsing each interval to `net = export − import` and simulating that
+single signed series looks simpler and is wrong: at zero capacity it reports
+2,344 Wh of grid import on a toy series where the meter measured 20,307 Wh.
+It understates the baseline by pretending within-interval flows cancel, which
+is not what happened — the house really did import that energy. Both
+orderings above reproduce the measured figure exactly at zero capacity, which
+is the property that makes them comparable to each other and to reality.
+
+Neither ordering is presented as the answer; the pair is the range, and no
+midpoint is invented.
 
 ### 4.3 Parameters
 
@@ -186,10 +218,12 @@ rather than modelled.
 No phase-1 module is modified. Of phase 2, only `battery.py`'s signature
 changes, additively.
 
-### 5.1 The EV classifier, re-derived
+### 5.1 The EV classifier, retained and re-tested
 
 Phase 2's rule — two hours above 2 kW — was fitted to a signal missing much
-of the car. It is **re-derived against the meter**, and the sensitivity grid
+of the car. The threshold is **retained unchanged** and re-applied to the
+meter — the build measured that the recommended capacity is unmoved across
+every threshold in the grid, so re-fitting it would buy nothing. The grid
 is republished, because the threshold that separated a partial signal is not
 necessarily the one that separates a complete one. The new classification is
 compared against phase 2's 72 nights, and the difference reported.
@@ -198,10 +232,12 @@ compared against phase 2's 72 nights, and the difference reported.
 
 **`out/meter_night_summary.csv`** — one row per night: `date`,
 `night_start_utc`, `night_end_utc`, `import_kwh`, `export_kwh`, `peak_kw`,
-`hours_above_2kw`, `is_ev`, `missing_intervals`, `covered`. Note `covered` is a boolean, not a ratio as in phase 2: the meter either recorded an interval or it did not, so there is no partial coverage to express.
+`hours_above_2kw`, `is_ev`, `missing_intervals`, `covered`. Note `covered` is a boolean here. Phase 2's `covered` was boolean too; what phase 3 has no equivalent of is its separate `coverage` *ratio* column, because the meter either recorded a quarter hour or it did not.
 
 **`out/meter_battery_sweep.csv`** — one row per (capacity, power, bound):
-the phase-2 metric set plus a `bound` column taking `net` or `gross`.
+the phase-2 metric set plus a `bound` column taking `charge_first` or
+`discharge_first`. (Drafted as `net`/`gross`; renamed during the build when
+section 4.2's framing changed to two within-interval orderings.)
 
 **HTML report**, published as a private Artifact. It must:
 
@@ -229,7 +265,7 @@ Test-driven. The load-bearing tests:
    3%. This is the evidence the night-extraction method is sound, and it must
    keep passing.
 2. **The divergence, 2023–2025.** The same comparison shows an annual-total
-   shortfall of 24.9%, 26.7% and 30.8% respectively. Assert each year is
+   shortfall of 24.9%, 27.6% and 30.8% respectively. Assert each year is
    between **20% and 35%** — wide enough that the boundary value of 24.9%
    does not sit on a cliff edge, narrow enough that the fault must still be
    there. The fault is a fact about the data; a test that stops failing here
@@ -240,9 +276,14 @@ Test-driven. The load-bearing tests:
    detected and counted rather than silently interpolated; and a night
    overlapping the January 2024 outage is excluded rather than counted as a
    low-consumption night.
-5. **Both bounds ordered.** For every capacity, the gross bound's grid import
-   is less than or equal to the net bound's. A violation means the bounds are
-   swapped or the dispatch is wrong.
+5. **Both bounds share a baseline, and neither dominates.** At zero capacity
+   the two orderings must reproduce measured grid import exactly — that shared
+   point is what makes them a bracket. They must NOT be asserted to be ordered:
+   this test originally required charge-first to win everywhere, which the
+   build measured to be false. Charge-first wins while the battery has room;
+   discharge-first wins once it is full, because serving the import first
+   frees room to absorb export that would otherwise spill. Test both
+   directions on fixtures that exercise each.
 6. **`dt_hours` actually binds.** The same synthetic series simulated at
    5 and 15 minutes gives a different power-cap outcome — otherwise the
    parameter is decorative.

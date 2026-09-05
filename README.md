@@ -127,13 +127,21 @@ capacity beyond which the marginal return never rises above the threshold
 happens to dip below it, which would catch the leading edge of that early
 climb and return a degenerate answer.
 
-As run against the current six years of data, at a 3 kW inverter this rule
-selects **7.5 kWh**, giving roughly 38% household night self-sufficiency at
-around 174 full-equivalent cycles per year. The full curve is in
-`battery_sweep.csv`, plotted on `night_report.html` alongside the all-nights
-curve for context, and printed as a table beside the chart with the chosen
-knee row marked, so a reader who prefers a different 50 kWh/kWh cut-off can
-read their own answer straight off the same page.
+**That rule is retained but is not the published answer.** Its 50 kWh/yr
+threshold was never derived from anything — no price, no tariff, no
+measurement — and trading a stock (kWh bought) against a flow (kWh/yr saved)
+needs an exchange rate that only a real quote can supply. `recommend_capacity`
+is kept and tested against the day one arrives; at a 3 kW inverter it selects
+7.5 kWh. What `night_report.html` actually leads with is the geometric elbow
+of the same curve, which is **8.0 kWh** on phase 2's data. That reading is not
+assumption-free either — it drifts with where the sweep is truncated and where
+it starts — so the page publishes the elbow-stability table beside it rather
+than claiming robustness.
+
+The full curve is in `battery_sweep.csv`, plotted on `night_report.html`
+alongside the all-nights curve for context, and printed as a table beside the
+chart, so a reader who prefers a different cut-off can read their own answer
+straight off the same page.
 
 ### Inverter power
 
@@ -147,3 +155,142 @@ leaves less headroom later, a real (if small) dispatch knock-on through the
 year-long chronological simulation, not the power cap itself binding. Either
 way the conclusion holds: at a capacity worth buying, inverter power is not
 the binding constraint here — capacity and winter generation are.
+
+## Night consumption measured at the smart meter
+
+```
+uv run python analyze_meter.py
+```
+
+**PVOutput's consumption channel undercounts the house from December 2022
+onward**, so the meter-based figures below supersede the phase-2 figures in
+the section above. Phase 2's outputs are kept, and still regenerated, for
+comparison only — they should not be used to size anything.
+
+The evidence is a direct monthly cross-check of the two independent sources
+over the nights both call usable: PVOutput's night energy divided by the
+meter's holds near 0.98 across 2020 through November 2022 (0.95–0.99 month by
+month), steps to 0.74 in December 2022, and never recovers. A ratio that drops
+by a quarter inside one month is a hardware event, not a gradual drift — most
+plausibly a CT clamp off one of the incoming lines.
+
+It steps *and then keeps sliding*: the measured shortfall is 24.9% in 2023,
+27.6% in 2024 and **30.8% in 2025**, with some 2025 months down at 0.64. A
+cleanly lost phase would sit at a stable fraction, so the continued decline
+says the unseen share of the load is growing — consistent with the EV, which
+arrived in 2022, charging on the circuit that stopped being counted.
+
+`analyze_meter.py` reads the quarter-hourly meter exports from
+`data/meterdata/`, reports (rather than interpolates) the gaps in them, cuts
+them against the same night boundaries in `out/solar_windows.csv`, runs the
+capacity sweep under both within-interval orderings, measures the resolution
+penalty against phase 2's finer data, and writes three files to `out/`:
+`meter_night_summary.csv`, `meter_battery_sweep.csv`, and
+`meter_report.html`.
+
+**`out/meter_night_summary.csv`** — one row per calendar date (2,556 data
+rows), from the meter. Night window, `import_kwh` and `export_kwh` across it,
+`peak_kw`, `hours_above_2kw`, `is_ev`, `missing_intervals`, and `covered`.
+Unlike phase 2 there is no partial-coverage ratio: the meter either recorded
+a quarter hour or it did not, so `covered` is a plain boolean meaning the
+night sits inside the meter's span and contains no missing interval. Across
+2,427 covered nights (2020-01-01 to 2026-09-02) median night consumption is
+**5.91 kWh** (p90 12.43 kWh) against phase 2's 4.85 kWh from the same house;
+135 of those nights are EV-charging, at a median of 24.8 kWh against 5.69 kWh
+for the rest.
+
+**`out/meter_battery_sweep.csv`** — the same columns as
+`battery_sweep.csv`, plus a `bound` column. A quarter hour can record both
+import and export — 13.5% of them do — and the meter cannot say which came
+first, which decides how much of that import a battery could have bridged.
+Every capacity is therefore simulated twice, as `charge_first` and
+`discharge_first`, sharing a baseline: both reproduce the measured grid
+import exactly at zero capacity. Neither is the answer; the pair is the
+range.
+
+**`out/meter_report.html`** — the side-by-side page, leading with the meter
+and showing phase 2 dashed and labelled superseded. A local build artefact,
+git-ignored like the other two reports.
+
+### Gaps are excluded, not counted as quiet nights
+
+The meter record has seven gaps. Four fall in January 2024 and together
+remove most of 8–19 January; that alone drops **10 nights** from the
+analysis. Midwinter is the season that dominates a battery answer, so treating
+those nights as unusually low consumption would understate exactly the demand
+that matters.
+
+Ten is the whole gap-related count. A further 119 nights are uncovered for an
+unrelated and harmless reason: the phase-1 window table runs to the end of the
+calendar year, so every night after the meter record ends has no data to cut.
+129 uncovered nights in total, 10 of them outages.
+
+### Recommended capacity
+
+The elbow of the household (non-EV) capacity curve at 3 kW lands at **9.0 kWh
+nameplate under both orderings** — the bracket is narrow enough here that it
+does not move the answer. Phase 2's elbow on the same rule is 8.0 kWh (the
+7.5 kWh quoted further up comes from the retired 50 kWh/kWh threshold rule,
+not from the elbow), so the meter moves the answer up by 1.0 kWh, two steps of
+the 0.5 kWh sweep. That is the expected direction: a channel that could not
+see part of the load understated the night it had to carry.
+
+**The difference is the source, not the span** — and that is measured rather
+than assumed. The meter record runs longer than PVOutput's at both ends, so
+`elbow_on_overlapping_span` re-runs the meter sweep over nothing but the dates
+PVOutput also covers. It still elbows at 9.0 kWh.
+
+**But 9.0 kWh has not converged, and the page now says so.** The elbow moves
+with where the sweep is truncated — 8.5 kWh at a 25 kWh sweep, 9.0 at 30 —
+and it keeps climbing past the published range: 9.5 at 35, 10.0 at 40, 11.0 at
+60, with no sign of settling. Phase 2's elbow genuinely settled at 8.0 across
+its last two truncations; this one does not. So 9.0 kWh is the *low* reading
+of that sequence rather than a converged answer.
+
+A separate reading agrees that no single number is defensible. The report's
+convergence card puts five threshold-free readings of the same curve side by
+side, and they **span 6.5 to 10.0 kWh** — that spread, not any row in it, is
+what the data supports. The two ranges are different measurements and are not
+interchangeable: 9.0-and-climbing is what truncation does to one reading;
+6.5-10.0 is what five different readings do to one sweep.
+
+Nobody is sized too large by 9.0 kWh. But the only route to a defensible
+single number is a real price per kWh, which is what the retained
+`recommend_capacity` is waiting for.
+
+At 9.0 kWh the simulation gives about 36% household
+night self-sufficiency at around 174 full-equivalent cycles per year — a
+figure phase 2 documents as understating by roughly 5%, since partial
+cycles are counted by energy throughput rather than by cycle count.
+
+Phase 2's winter wall — the months whose median daytime surplus is negative,
+where no capacity helps because there is nothing to charge from — is **not
+re-measured here**. `sweep_bounds` discards the monthly discharge that would
+show it, so this phase has no evidence either way, and repeating phase 2's
+figure would mean quoting the consumption channel this whole document declares
+superseded. The effect is physical and does not go away; its size against
+meter data is simply not yet known.
+
+### The resolution penalty
+
+The meter records at 15 minutes, and averaging over 15 minutes hides short
+peaks, so a battery simulated at that resolution should flatter itself.
+Rather than assume a size for that, it is measured: phase 2's 5-minute
+PVOutput data is aggregated onto the 15-minute boundaries the meter itself
+keeps, the same capacity sweep is run over both, and the two are read at the
+5-minute elbow. The measured difference is **-0.016%** — the coarser run
+imports marginally *more*, so there is no penalty to speak of in either
+direction.
+
+Treat that as zero rather than as a number. The measurement's own arbitrary
+choices move it by more than its own size: grouping the 5-minute samples from
+index 0 instead of on the clock gives +0.080%, and the four possible phasings
+span 0.10 percentage points and both signs. Only the clock-aligned grouping
+matches the boundaries the meter records on, which is why it is the one used —
+but the honest reading is that the effect is below what this method can
+resolve.
+
+Near zero is what the mechanism predicts: at night there is no generation to
+cancel against load within an interval, and a power cap in kW binds at the
+same rate whatever the interval length, so coarsening can only blur short
+peaks and daytime charging.

@@ -7,3 +7,4 @@ __pycache__/
 *.py[cod]
 out/report.html
 out/night_report.html
+out/meter_report.html
