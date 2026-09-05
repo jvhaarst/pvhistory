@@ -50,6 +50,8 @@ class SimResult:
     nonev_grid_import_wh: np.ndarray
     monthly_discharge_wh: np.ndarray
     final_stored_wh: np.ndarray
+    band_grid_import_wh: np.ndarray | None = None
+    band_export_wh: np.ndarray | None = None
 
 
 def simulate(
@@ -59,6 +61,8 @@ def simulate(
     month_idx: np.ndarray,
     spec: BatterySpec,
     dt_hours: float = DT_HOURS,
+    band_idx: np.ndarray | None = None,
+    n_bands: int | None = None,
 ) -> SimResult:
     """Run the whole timeline once for every capacity in `spec`.
 
@@ -67,6 +71,11 @@ def simulate(
     `night_mask` and `nonev_mask` select which intervals contribute to the
     night-specific accumulators — the timeline itself is never broken up, so
     the battery's state always reflects every night that actually happened.
+
+    `band_idx` is optional and additive: when given, import and export are
+    additionally accumulated per tariff band, using the same pattern
+    `month_idx` already uses for discharge. With it None the results are
+    bit-identical to a run without it, which phases 2 and 3 depend on.
     """
     caps = spec.usable_wh
     n = len(caps)
@@ -85,6 +94,18 @@ def simulate(
     nonev_grid = np.zeros(n)
     monthly = np.zeros((12, n))
 
+    band_import = band_export = None
+    if band_idx is not None:
+        band_idx = np.asarray(band_idx)
+        if n_bands is None:
+            n_bands = int(band_idx.max()) + 1
+        if band_idx.min() < 0 or band_idx.max() >= n_bands:
+            raise ValueError(
+                f"band_idx out of range: [{band_idx.min()}, {band_idx.max()}] "
+                f"against n_bands={n_bands}")
+        band_import = np.zeros((n_bands, n))
+        band_export = np.zeros((n_bands, n))
+
     for t in range(len(net_wh)):
         e = float(net_wh[t])
         if e > 0.0:
@@ -92,6 +113,8 @@ def simulate(
             stored += accept * eta
             charge += accept
             export += e - accept
+            if band_export is not None:
+                band_export[band_idx[t]] += e - accept
         elif e < 0.0:
             need = -e
             deliver = np.minimum(np.minimum(need, limit_wh), stored * eta)
@@ -99,6 +122,8 @@ def simulate(
             discharge += deliver
             shortfall = need - deliver
             grid += shortfall
+            if band_import is not None:
+                band_import[band_idx[t]] += shortfall
             if night_mask[t]:
                 night_grid += shortfall
             if nonev_mask[t]:
@@ -115,6 +140,8 @@ def simulate(
         nonev_grid_import_wh=nonev_grid,
         monthly_discharge_wh=monthly,
         final_stored_wh=stored,
+        band_grid_import_wh=band_import,
+        band_export_wh=band_export,
     )
 
 

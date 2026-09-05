@@ -107,3 +107,74 @@ def test_monthly_discharge_lands_in_the_right_month():
     assert r.monthly_discharge_wh[0, 0] == pytest.approx(1000.0)
     assert r.monthly_discharge_wh[6, 0] == pytest.approx(1000.0)
     assert r.monthly_discharge_wh[3, 0] == pytest.approx(0.0)
+
+
+def test_band_flows_are_absent_unless_asked_for():
+    net = np.array([1000.0, -1000.0])
+    z = np.zeros(2, bool)
+    mi = np.zeros(2, int)
+    r = simulate(net, z, z, mi, BatterySpec(np.array([5.0]), power_kw=3.0))
+    assert r.band_grid_import_wh is None
+    assert r.band_export_wh is None
+
+
+def test_band_flows_reconcile_with_the_totals():
+    """Splitting a flow by band must not create or destroy energy.
+
+    This is the guard that matters: a band map with a hole, or an off-by-one
+    index, would still produce plausible-looking euro figures.
+    """
+    rng = np.random.default_rng(0)
+    net = rng.normal(0, 800, 500)
+    z = np.zeros(500, bool)
+    mi = np.zeros(500, int)
+    bands = rng.integers(0, 3, 500)
+    spec = BatterySpec(np.arange(0.0, 6.1, 1.5), power_kw=3.0)
+    r = simulate(net, z, z, mi, spec, band_idx=bands, n_bands=3)
+
+    assert r.band_grid_import_wh.shape == (3, len(spec.capacities_kwh))
+    assert r.band_grid_import_wh.sum(axis=0) == pytest.approx(r.grid_import_wh)
+    assert r.band_export_wh.sum(axis=0) == pytest.approx(r.export_wh)
+
+
+def test_asking_for_band_flows_does_not_change_any_other_result():
+    """The additive keyword must be exactly that.
+
+    Phases 2 and 3 both rest on this dispatch loop, and their published
+    figures must not move because a later phase wanted a new accumulator.
+    """
+    rng = np.random.default_rng(1)
+    net = rng.normal(0, 800, 400)
+    nm = rng.random(400) < 0.4
+    em = nm & (rng.random(400) < 0.5)
+    mi = rng.integers(0, 12, 400)
+    spec = BatterySpec(np.arange(0.0, 9.1, 1.5), power_kw=3.0)
+
+    plain = simulate(net, nm, em, mi, spec)
+    banded = simulate(net, nm, em, mi, spec, band_idx=rng.integers(0, 3, 400),
+                      n_bands=3)
+
+    for field in ("grid_import_wh", "export_wh", "charge_wh", "discharge_wh",
+                  "night_grid_import_wh", "nonev_grid_import_wh",
+                  "final_stored_wh"):
+        assert getattr(plain, field) == pytest.approx(getattr(banded, field)), field
+    assert plain.monthly_discharge_wh == pytest.approx(banded.monthly_discharge_wh)
+
+
+def test_n_bands_defaults_to_the_highest_index_present():
+    net = np.array([1000.0, -1000.0])
+    z = np.zeros(2, bool)
+    mi = np.zeros(2, int)
+    r = simulate(net, z, z, mi, BatterySpec(np.array([5.0]), power_kw=3.0),
+                 band_idx=np.array([0, 1]))
+    assert r.band_grid_import_wh.shape[0] == 2
+
+
+def test_a_band_index_out_of_range_raises_rather_than_wrapping():
+    """Negative or oversized indices must not silently land in another band."""
+    net = np.array([1000.0, -1000.0])
+    z = np.zeros(2, bool)
+    mi = np.zeros(2, int)
+    with pytest.raises(ValueError, match="band_idx"):
+        simulate(net, z, z, mi, BatterySpec(np.array([5.0]), power_kw=3.0),
+                 band_idx=np.array([0, 5]), n_bands=3)
