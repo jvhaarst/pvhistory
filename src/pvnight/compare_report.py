@@ -22,7 +22,13 @@ from .battery import (  # noqa: E402
     elbow_capacity,
     elbow_stability,
 )
-from .night_report import TABLE_CSS  # noqa: E402
+from .meter_wall import negative_surplus_months  # noqa: E402
+from .night_report import (  # noqa: E402
+    MONTHS,
+    TABLE_CSS,
+    _by_month,
+    _join_month_names,
+)
 from .report import FURNITURE, SERIES, STYLE, _svg  # noqa: E402
 
 # The two within-interval orderings (spec S4.2). `charge_first` puts the
@@ -81,6 +87,72 @@ def format_penalty_pct(pct: float) -> str:
 # ---------------------------------------------------------------------------
 # Charts
 # ---------------------------------------------------------------------------
+
+
+
+def chart_surplus_vs_need(monthly: pd.DataFrame) -> str:
+    """The winter wall: a month with a negative surplus charges nothing.
+
+    Same form as phase 2's, so the two can be read side by side — but drawn
+    from the meter, where "surplus" is the net daytime position rather than a
+    generation figure minus a consumption channel that was undercounting.
+    """
+    fig, ax = plt.subplots(figsize=(9, 4))
+    m = _by_month(monthly)
+    x = np.arange(12)
+    ax.bar(x - 0.2, m["surplus_kwh"], 0.4, color=SERIES[2],
+           label="daytime surplus (export − import)")
+    ax.bar(x + 0.2, m["night_kwh"], 0.4, color=SERIES[1], label="night need")
+    ax.axhline(0, color=FURNITURE, lw=1)
+    ax.set_xticks(x)
+    ax.set_xticklabels(MONTHS)
+    ax.set_ylabel("kWh per day (median)")
+    ax.legend(frameon=False, labelcolor=FURNITURE, fontsize=8)
+    return _svg(fig)
+
+
+def chart_monthly_discharge(discharge: pd.DataFrame, capacity_kwh: float) -> str:
+    """What the recommended battery actually delivers, month by month."""
+    fig, ax = plt.subplots(figsize=(9, 3.5))
+    d = discharge.sort_values("month")
+    ax.bar(np.arange(12), d["discharge_kwh"], 0.6, color=SERIES[0])
+    ax.set_xticks(np.arange(12))
+    ax.set_xticklabels(MONTHS)
+    ax.set_ylabel(f"kWh discharged per year\nat {capacity_kwh:.1f} kWh")
+    return _svg(fig)
+
+
+def _wall_prose(monthly: pd.DataFrame, coverable_pct: float,
+                negative_months: list[int]) -> str:
+    """The winter finding, built from the frames the charts draw.
+
+    Phase 2's equivalent sentence was one of this project's several pieces of
+    prose that disagreed with its own data, so every number here is read from
+    `monthly` rather than written beside it.
+    """
+    if negative_months:
+        names = _join_month_names(negative_months)
+        worst = monthly.loc[monthly["surplus_kwh"].idxmin()]
+        wall = (
+            f"In {names} the median daytime surplus is "
+            "<strong>negative</strong> — the house does not send enough to "
+            "the grid to cover even its own daytime draw, so a battery "
+            "receives no charge at all. The worst is "
+            f"{_join_month_names([int(worst['month'])])}, at "
+            f"<strong>{worst['surplus_kwh']:.1f} kWh</strong> a day against a "
+            f"night needing {worst['night_kwh']:.1f} kWh."
+        )
+    else:
+        wall = ("No month here has a negative median daytime surplus, so "
+                "winter alone does not block charging on this record.")
+    return (
+        "Median daytime surplus against median night need, per month, both "
+        "measured at the meter. " + wall +
+        f" Across the whole record only <strong>{coverable_pct:.1f}%</strong> "
+        "of nights could have been covered even by an infinite battery with "
+        "no power limit and no round-trip loss. That ceiling, not capacity, "
+        "is what bounds this answer."
+    )
 
 
 def chart_visible_fraction(monthly_ratio: pd.DataFrame) -> str:
@@ -437,7 +509,10 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
                 sensitivity: pd.DataFrame, monthly_ratio: pd.DataFrame,
                 gaps: pd.DataFrame, resolution_penalty_pct: float,
                 excluded_nights: int,
-                elbow_overlapping_span: float = float("nan")) -> str:
+                elbow_overlapping_span: float = float("nan"),
+                monthly_wall: pd.DataFrame | None = None,
+                monthly_discharge: pd.DataFrame | None = None,
+                coverable_pct: float = float("nan")) -> str:
     """Assemble the report. No document wrapper — the host supplies it.
 
     Leads with the meter figures; phase 2's PVOutput-based figures are shown
@@ -585,6 +660,19 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
          "meter's — the same fault chart one shows, expressed as missed "
          "energy rather than a ratio.",
          chart_night_distribution(meter_nights, pv_nights)),
+        *([] if monthly_wall is None or monthly_wall.empty else [
+            ("The winter wall",
+             _wall_prose(monthly_wall, coverable_pct,
+                         negative_surplus_months(monthly_wall)),
+             chart_surplus_vs_need(monthly_wall))]),
+        *([] if monthly_discharge is None or monthly_discharge.empty else [
+            ("What the battery actually delivers, month by month",
+             "The same wall seen from the battery's side. Discharge at "
+             f"<strong>{lo:.1f} kWh</strong> collapses in the months above "
+             "that have nothing to charge from, and no capacity changes "
+             "that — which is why the sizing question below is bounded by "
+             "the chart above it, not by the curve.",
+             chart_monthly_discharge(monthly_discharge, lo))]),
         ("How much capacity is worth buying, and how little the ordering "
          "matters",
          "The meter cannot tell which of a quarter-hour's import and "

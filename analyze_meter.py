@@ -15,7 +15,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from pvnight import battery, compare_report, meter, meter_battery, meter_nights
+from pvnight import (
+    battery,
+    compare_report,
+    meter,
+    meter_battery,
+    meter_nights,
+    meter_wall,
+)
 from pvnight.config import DATA_SUBDIR
 from pvnight.loader import load
 
@@ -237,12 +244,22 @@ def run(repo_root: Path, out_dir: Path) -> dict:
 
     elbow_overlap = elbow_on_overlapping_span(meter_df, nights_df, samples)
 
+    # The ceiling on any battery answer, re-derived from the meter. Phase 2
+    # measured it against the consumption channel later found faulty, so its
+    # 48.2% is not carried forward.
+    daily = meter_wall.daily_surplus(meter_df, windows, gaps)
+    wall = meter_wall.monthly_wall(daily, nights_df)
+    coverable = meter_wall.coverable_fraction(daily, nights_df)
+    discharge = meter_wall.monthly_discharge(
+        meter_df, nights_df, elbows["charge_first"])
+
     ratio = monthly_ratio(nights_df, pv_nights)
     penalty = resolution_penalty_pct(samples, pv_nights, pv_sweep)
     excluded, worst_month_name = _excluded_in_worst_gap_month(nights_df, gaps)
 
     nights_df.to_csv(out_dir / "meter_night_summary.csv", index=False)
     sweep_df.to_csv(out_dir / "meter_battery_sweep.csv", index=False)
+    wall.to_csv(out_dir / "meter_monthly_wall.csv", index=False)
     (out_dir / "meter_report.html").write_text(
         compare_report.build_html(
             nights_df, pv_nights, sweep_df, pv_sweep, sensitivity,
@@ -250,6 +267,9 @@ def run(repo_root: Path, out_dir: Path) -> dict:
             resolution_penalty_pct=penalty,
             excluded_nights=excluded,
             elbow_overlapping_span=elbow_overlap,
+            monthly_wall=wall,
+            monthly_discharge=discharge,
+            coverable_pct=100.0 * coverable,
         )
     )
 
@@ -261,6 +281,8 @@ def run(repo_root: Path, out_dir: Path) -> dict:
         "elbow_charge_first_kwh": float(elbows["charge_first"]),
         "elbow_discharge_first_kwh": float(elbows["discharge_first"]),
         "elbow_overlapping_span_kwh": float(elbow_overlap),
+        "coverable_pct": float(100.0 * coverable),
+        "negative_surplus_months": meter_wall.negative_surplus_months(wall),
         "resolution_penalty_pct": float(penalty),
         "excluded_nights_worst_month": int(excluded),
         "worst_gap_month": worst_month_name,

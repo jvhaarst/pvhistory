@@ -100,7 +100,7 @@ the year, the capacity/marginal-return curves with the chosen knee marked,
 and EV-charging sensitivity. Also a local build artefact, git-ignored like
 `out/report.html`.
 
-### The winter wall
+### The winter wall (superseded — see the meter section below)
 
 Median daytime surplus (generation minus that day's household draw) is
 **negative in November, December and January** — in those months there is,
@@ -112,6 +112,11 @@ power-unlimited battery could actually have carried on daytime surplus alone
 — that figure is the real ceiling on any capacity recommendation, and is
 quoted directly on the report page rather than restated here, since it moves
 with each data refresh.
+
+Both figures here are understated. Measured at the meter, five months are
+negative rather than three, and the ceiling is 42.9% rather than 48.2%. The
+daytime consumption in "generation minus that day's household draw" came from
+the channel that was undercounting.
 
 ### Recommended capacity
 
@@ -185,7 +190,8 @@ arrived in 2022, charging on the circuit that stopped being counted.
 them against the same night boundaries in `out/solar_windows.csv`, runs the
 capacity sweep under both within-interval orderings, measures the resolution
 penalty against phase 2's finer data, and writes three files to `out/`:
-`meter_night_summary.csv`, `meter_battery_sweep.csv`, and
+`meter_night_summary.csv`, `meter_battery_sweep.csv`,
+`meter_monthly_wall.csv`, and
 `meter_report.html`.
 
 **`out/meter_night_summary.csv`** — one row per calendar date (2,556 data
@@ -207,6 +213,11 @@ Every capacity is therefore simulated twice, as `charge_first` and
 `discharge_first`, sharing a baseline: both reproduce the measured grid
 import exactly at zero capacity. Neither is the answer; the pair is the
 range.
+
+**`out/meter_monthly_wall.csv`** — twelve rows, one per calendar month:
+`surplus_kwh` (median net daytime position), `night_kwh` (median night need)
+and `n_days`. This is the table behind the winter-wall section below, and it
+is the constraint the capacity recommendation sits underneath.
 
 **`out/meter_report.html`** — the side-by-side page, leading with the meter
 and showing phase 2 dashed and labelled superseded. A local build artefact,
@@ -263,13 +274,39 @@ night self-sufficiency at around 174 full-equivalent cycles per year — a
 figure phase 2 documents as understating by roughly 5%, since partial
 cycles are counted by energy throughput rather than by cycle count.
 
-Phase 2's winter wall — the months whose median daytime surplus is negative,
-where no capacity helps because there is nothing to charge from — is **not
-re-measured here**. `sweep_bounds` discards the monthly discharge that would
-show it, so this phase has no evidence either way, and repeating phase 2's
-figure would mean quoting the consumption channel this whole document declares
-superseded. The effect is physical and does not go away; its size against
-meter data is simply not yet known.
+### The winter wall, re-measured
+
+Capacity is not what bounds this answer, and the meter says so more firmly
+than PVOutput did. Daytime surplus here is the **net daytime position** —
+export minus import across the phase-1 solar window — which is the same
+quantity phase 2 computed as generation minus daytime load, but measured at
+the connection rather than inferred through the faulty channel.
+
+Five months have a negative median daytime surplus: **January, February,
+October, November and December**. In those months the house does not send
+enough to the grid to cover even its own daytime draw, so a battery receives
+no charge at all. December is the worst, at -4.8 kWh a day against a night
+needing 11.2 kWh.
+
+Across the whole record only **42.9% of nights** could have been covered even
+by an infinite battery with no power limit and no round-trip loss. Phase 2 put
+that ceiling at 48.2%; the meter's is lower because night need is 22% higher
+than PVOutput could see. **The wall is harder than it looked, not softer** —
+which is the expected direction, and the reason it was worth re-measuring
+rather than carrying the old figure forward.
+
+Days whose solar window overlaps a meter gap are excluded, exactly as nights
+are. Left in, an outage is indistinguishable from a day that generated
+nothing, and would have manufactured a wall in January 2024 — the month that
+already dominates the answer. 2,427 of 2,557 days survive that filter, and
+2,424 of them pair with a usable night — that pairing, not the raw day count,
+is what the monthly table counts, because a day's surplus is judged against
+its own night.
+
+`out/meter_monthly_wall.csv` holds the monthly table, and the report draws it
+twice: as surplus against need, and as what a 9.0 kWh battery actually
+discharges month by month. The second is the same wall seen from the
+battery's side.
 
 ### The resolution penalty
 
