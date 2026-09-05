@@ -1,0 +1,176 @@
+"""The battery in euros.
+
+Every capacity recommendation this project published before this module was
+energy-only, which meant trading a stock (kWh bought) against a flow (kWh/yr
+saved) with no exchange rate. Two attempts to supply one failed: an invented
+50 kWh/yr threshold, removed at the user's instruction, and a geometric elbow
+that turned out to drift with the sweep's truncation. A tariff supplies a
+real rate, so this module is where the recommendation stops being arbitrary.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from .battery import BatterySpec, simulate
+from .meter import DT_HOURS
+from .meter_battery import _masks, bound_signals
+from .tariff import Tariff
+
+
+def full_years(ts_utc) -> set[int]:
+    """Calendar years the record covers end to end.
+
+    Derived from the span rather than hardcoded. A first draft pinned this to
+    a literal `2026-01-01`, which silently admitted **2019** — the record
+    opens at 2019-12-31 23:15 UTC, so that "year" holds three intervals and a
+    EUR 0.03 bill. Averaging EUR/yr across it diluted every saving by a
+    seventh. A literal cutoff would also rot the moment new data arrived.
+    """
+    idx = pd.DatetimeIndex(ts_utc)
+    lo, hi = idx.min(), idx.max()
+    out = set()
+    for y in range(int(lo.year), int(hi.year) + 1):
+        start = pd.Timestamp(f"{y}-01-01", tz="UTC")
+        end = pd.Timestamp(f"{y + 1}-01-01", tz="UTC")
+        if lo <= start and hi >= end - pd.Timedelta(days=1):
+            out.add(y)
+    return out
+
+
+def year_band_index(ts_utc, tariff: Tariff) -> tuple[np.ndarray, list[int], int]:
+    """One index encoding both the calendar year and the tariff band.
+
+    Per-year figures could be had by simulating each year separately, but the
+    battery's state of charge carries across a year boundary and phase 3's
+    spec is explicit that the timeline is never broken up. Encoding
+    ``year * n_bands + band`` into a single accumulator index gets per-year
+    costs out of one continuous simulation instead.
+    """
+    idx = pd.DatetimeIndex(ts_utc)
+    years = sorted({int(y) for y in idx.year})
+    pos = {y: i for i, y in enumerate(years)}
+    n_bands = len(tariff.bands)
+    band = tariff.index_for(idx)
+    year_pos = np.array([pos[int(y)] for y in idx.year])
+    return year_pos * n_bands + band, years, n_bands
+
+
+def price_capacities(meter_df: pd.DataFrame, nights_df: pd.DataFrame,
+                     capacities_kwh: np.ndarray, tariff: Tariff,
+                     power_kw: float = 3.0, round_trip: float = 0.90,
+                     usable_fraction: float = 0.90) -> pd.DataFrame:
+    """Cost of the variable electricity bill, per capacity and per year.
+
+    Uses the charge-first ordering. Phase 3 measured the two within-interval
+    orderings to differ by under 0.06% of baseline import and to agree on the
+    elbow, so the choice does not move the answer.
+    """
+    m = meter_df.sort_values("ts_utc").reset_index(drop=True)
+    night_i, nonev_i, month_i = _masks(m, nights_df)
+    sig, src = bound_signals(m)["charge_first"]
+
+    combo, years, n_bands = year_band_index(m["ts_utc"], tariff)
+    complete = full_years(m["ts_utc"])
+    spec = BatterySpec(np.asarray(capacities_kwh, float), power_kw,
+                       round_trip, usable_fraction)
+    r = simulate(sig, night_i[src], nonev_i[src], month_i[src], spec,
+                 dt_hours=DT_HOURS, band_idx=combo[src],
+                 n_bands=len(years) * n_bands)
+
+    lev = tariff.bands["levering_eur_kwh"].to_numpy()
+    net_exp = tariff.net_export_eur_kwh
+    rows = []
+    for yi, year in enumerate(years):
+        sl = slice(yi * n_bands, (yi + 1) * n_bands)
+        imp = r.band_grid_import_wh[sl] / 1000.0        # (n_bands, n_caps)
+        exp = r.band_export_wh[sl] / 1000.0
+        cost = ((imp * lev[:, None]).sum(axis=0)
+                - (exp * net_exp[:, None]).sum(axis=0))
+        for ci, cap in enumerate(spec.capacities_kwh):
+            rows.append({
+                "capacity_kwh": float(cap),
+                "year": int(year),
+                "is_full_year": int(year) in complete,
+                "import_kwh": float(imp[:, ci].sum()),
+                "export_kwh": float(exp[:, ci].sum()),
+                "cost_eur": float(cost[ci]),
+            })
+    return pd.DataFrame(rows)
+
+
+def savings(priced: pd.DataFrame) -> pd.DataFrame:
+    """What each capacity saves against no battery, per year."""
+    base = priced[priced["capacity_kwh"] == 0.0].set_index("year")["cost_eur"]
+    if base.empty:
+        raise ValueError(
+            "savings: the sweep must include capacity 0.0 — it is the "
+            "baseline every saving is measured against")
+    out = priced.copy()
+    out["saving_eur"] = out["year"].map(base).to_numpy() - out["cost_eur"]
+    return out[["capacity_kwh", "year", "is_full_year", "cost_eur", "saving_eur"]]
+
+
+def break_even_eur_per_kwh(saving_eur_per_yr: float, capacity_kwh: float,
+                           years: float) -> float:
+    """Installed cost per kWh at which this capacity exactly repays itself.
+
+    Undiscounted, and degradation is not modelled — both stated on the page.
+    """
+    if capacity_kwh <= 0:
+        return float("nan")
+    return float(saving_eur_per_yr * years / capacity_kwh)
+
+
+def payback_years(saving_eur_per_yr: float, capacity_kwh: float,
+                  eur_per_kwh: float, fixed_cost_eur: float) -> float:
+    if saving_eur_per_yr <= 0:
+        return float("inf")
+    return float((fixed_cost_eur + capacity_kwh * eur_per_kwh)
+                 / saving_eur_per_yr)
+
+
+def recommend_capacity_eur(annual: pd.DataFrame, eur_per_kwh: float,
+                           fixed_cost_eur: float, years: float) -> float:
+    """The capacity with the best undiscounted net position over ``years``.
+
+    Not the largest saving: a bigger battery always saves more energy, so a
+    rule that maximised saving would always recommend the largest capacity
+    swept. Returns 0.0 when nothing pays back, which is a real answer.
+    """
+    a = annual.sort_values("capacity_kwh")
+    net = (a["saving_eur"].to_numpy() * years
+           - fixed_cost_eur - a["capacity_kwh"].to_numpy() * eur_per_kwh)
+    if net.max() <= 0:
+        return 0.0
+    return float(a["capacity_kwh"].to_numpy()[int(np.argmax(net))])
+
+
+def blended_value_eur_per_kwh(priced: pd.DataFrame, capacity_kwh: float) -> float:
+    """Euros saved per kWh of grid import the battery actually displaced.
+
+    Measured from the band mix the battery displaces rather than assumed,
+    because displaced energy is not spread evenly across the bands.
+    """
+    s = savings(priced)
+    row = s[s["capacity_kwh"] == capacity_kwh]
+    base = priced[priced["capacity_kwh"] == 0.0]["import_kwh"].sum()
+    here = priced[priced["capacity_kwh"] == capacity_kwh]["import_kwh"].sum()
+    displaced = base - here
+    if displaced <= 0:
+        return float("nan")
+    return float(row["saving_eur"].sum() / displaced)
+
+
+def derived_threshold_kwh_per_kwh(eur_per_kwh: float, years: float,
+                                  blended_value: float) -> float:
+    """The kWh/yr a marginal kWh of capacity must return to be worth buying.
+
+    This is the number ``battery.recommend_capacity`` was always missing. Its
+    default of 50 was a judgement call the user had removed from the report;
+    this replaces it with an arithmetic consequence of a real price.
+    """
+    if years <= 0 or blended_value <= 0:
+        return float("nan")
+    return float(eur_per_kwh / (years * blended_value))
