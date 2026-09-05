@@ -156,3 +156,56 @@ def test_the_partial_year_is_flagged_rather_than_annualised(toy_tariff):
     assert set(priced["year"]) == {2024, 2025}
     assert priced.loc[priced.year == 2024, "is_full_year"].all()
     assert not priced.loc[priced.year == 2025, "is_full_year"].any()
+
+
+def test_arbitrage_ceiling_uses_the_widest_spread_available_in_a_day(toy_tariff):
+    """Buy at the cheapest band, discharge at the dearest, once a day.
+
+    Deliberately generous: it ignores that the battery is already busy doing
+    self-consumption. A ceiling is allowed to be unreachable — that is what
+    makes it a ceiling — but it must be labelled as one wherever it appears.
+    """
+    ts = pd.date_range("2024-06-01", periods=96 * 10, freq="15min", tz="UTC")
+    m = pd.DataFrame({"ts_utc": ts, "import_kwh": 0.0, "export_kwh": 0.0})
+    out = economics.arbitrage_ceiling_eur_yr(m, toy_tariff, capacity_kwh=10.0)
+
+    # Toy bands: buy at 0.20, displace 0.30, round trip 0.90.
+    assert out["best_spread_eur_kwh"] == pytest.approx(0.30 - 0.20 / 0.90)
+    assert out["ceiling_eur_yr"] > 0.0
+
+
+def test_arbitrage_ceiling_is_zero_when_every_band_costs_the_same():
+    flat = Tariff(
+        bands=pd.DataFrame({"band": ["A", "B"],
+                            "levering_eur_kwh": [0.25, 0.25],
+                            "terugleverkosten_eur_kwh": [0.05, 0.05],
+                            "vergoeding_eur_kwh": [0.06, 0.06]}),
+        hour_map=np.zeros((2, 24), dtype=int),
+    )
+    ts = pd.date_range("2024-06-01", periods=96 * 5, freq="15min", tz="UTC")
+    m = pd.DataFrame({"ts_utc": ts, "import_kwh": 0.0, "export_kwh": 0.0})
+    out = economics.arbitrage_ceiling_eur_yr(m, flat, capacity_kwh=10.0)
+    assert out["ceiling_eur_yr"] == pytest.approx(0.0)
+
+
+def test_arbitrage_ceiling_never_moves_more_than_the_inverter_can():
+    """A huge battery is still limited by what the inverter can push in a day."""
+    ts = pd.date_range("2024-06-01", periods=96 * 5, freq="15min", tz="UTC")
+    m = pd.DataFrame({"ts_utc": ts, "import_kwh": 0.0, "export_kwh": 0.0})
+    small = economics.arbitrage_ceiling_eur_yr(
+        m, _two_band_tariff(), capacity_kwh=10.0)
+    huge = economics.arbitrage_ceiling_eur_yr(
+        m, _two_band_tariff(), capacity_kwh=1000.0)
+    assert huge["ceiling_eur_yr"] < 30.0 * small["ceiling_eur_yr"]
+
+
+def _two_band_tariff():
+    bands = pd.DataFrame({
+        "band": ["Peak", "Off"],
+        "levering_eur_kwh": [0.30, 0.20],
+        "terugleverkosten_eur_kwh": [0.07, 0.05],
+        "vergoeding_eur_kwh": [0.08, 0.06],
+    })
+    hour_map = np.zeros((2, 24), dtype=int)
+    hour_map[:, 0:12] = 1
+    return Tariff(bands=bands, hour_map=hour_map)

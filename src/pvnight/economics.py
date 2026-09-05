@@ -16,6 +16,7 @@ import pandas as pd
 from .battery import BatterySpec, simulate
 from .meter import DT_HOURS
 from .meter_battery import _masks, bound_signals
+from .config import SITE_TZ
 from .tariff import Tariff
 
 
@@ -174,3 +175,48 @@ def derived_threshold_kwh_per_kwh(eur_per_kwh: float, years: float,
     if years <= 0 or blended_value <= 0:
         return float("nan")
     return float(eur_per_kwh / (years * blended_value))
+
+
+def arbitrage_ceiling_eur_yr(meter_df: pd.DataFrame, tariff: Tariff,
+                             capacity_kwh: float, power_kw: float = 3.0,
+                             round_trip: float = 0.90,
+                             usable_fraction: float = 0.90) -> dict:
+    """An upper bound on what price-aware grid charging could add.
+
+    Not a recommendation and not a dispatch policy. It answers one question:
+    is a price-aware phase worth building at all?
+
+    The bound is deliberately loose in three ways, all of which push it up,
+    so a small number here is genuinely conclusive while a large one only
+    means "worth investigating":
+
+    - it assumes one full cycle every day at the day's widest band spread;
+    - it ignores that the battery is already occupied storing solar surplus;
+    - it uses perfect foresight, which no policy has.
+
+    Hindsight is legitimate for a bound and illegitimate for a
+    recommendation, so every caller must label it.
+    """
+    idx = pd.DatetimeIndex(meter_df["ts_utc"])
+    band = tariff.index_for(idx)
+    lev = tariff.bands["levering_eur_kwh"].to_numpy()[band]
+
+    d = pd.DataFrame({"day": idx.tz_convert(SITE_TZ).normalize(), "price": lev})
+    per_day = d.groupby("day")["price"].agg(["min", "max"])
+
+    # Buying loses the round trip; displacing does not.
+    spread = (per_day["max"] - per_day["min"] / round_trip).clip(lower=0.0)
+
+    eta = float(np.sqrt(round_trip))
+    usable_kwh = capacity_kwh * usable_fraction
+    # A cycle is also capped by what the inverter can move in a day.
+    movable_kwh = min(usable_kwh, power_kw * 24.0 * eta)
+
+    total = float((spread * movable_kwh).sum())
+    years = (idx.max() - idx.min()).total_seconds() / (365.25 * 24 * 3600)
+    return {
+        "ceiling_eur_yr": total / years if years > 0 else float("nan"),
+        "best_spread_eur_kwh": float(spread.max()) if len(spread) else 0.0,
+        "usable_days": int((spread > 0).sum()),
+        "years": float(years),
+    }
