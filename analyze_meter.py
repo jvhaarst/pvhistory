@@ -22,13 +22,16 @@ from pvnight import (
     meter_battery,
     meter_nights,
     meter_wall,
+    tariff,
 )
+from pvnight import economics
 from pvnight.config import DATA_SUBDIR
 from pvnight.loader import load
 
 CAPACITIES = np.arange(0.0, 30.01, 0.5)
 POWER_KWS = (2.5, 3.0, 3.7)
 REPORT_POWER_KW = 3.0
+HORIZON_YEARS = 10.0
 
 # PVOutput samples every five minutes; the meter every fifteen. Three of the
 # former make one of the latter, which is what makes the resolution penalty
@@ -253,6 +256,43 @@ def run(repo_root: Path, out_dir: Path) -> dict:
     discharge = meter_wall.monthly_discharge(
         meter_df, nights_df, elbows["charge_first"])
 
+    # Euros. The tariff is the first real exchange rate this project has had:
+    # every earlier capacity figure traded a stock against a flow with none.
+    tar = tariff.load_tariff(repo_root / tariff.TARIFF_FILE)
+    priced = economics.price_capacities(meter_df, nights_df, CAPACITIES, tar)
+    saved = economics.savings(priced)
+    complete = saved[saved["is_full_year"]]
+    annual = complete.groupby("capacity_kwh", as_index=False)["saving_eur"].mean()
+    annual["break_even_eur_per_kwh"] = [
+        economics.break_even_eur_per_kwh(v, c, HORIZON_YEARS)
+        for v, c in zip(annual["saving_eur"], annual["capacity_kwh"])]
+    quotes = economics.quote_table(annual, years=(HORIZON_YEARS, 15.0))
+
+    # The cheapest quote per kWh sets the recommendation; the spread across
+    # quotes is published beside it rather than averaged away.
+    best = quotes.loc[quotes["eur_per_kwh"].idxmin()]
+    euro_opt = economics.recommend_capacity_eur(
+        annual, float(best["eur_per_kwh"]), economics.FIXED_COST_EUR,
+        HORIZON_YEARS)
+    blended = economics.blended_value_eur_per_kwh(priced, euro_opt or 9.0)
+    latest_full = int(complete["year"].max())
+    econ = {
+        "no_battery_cost_eur": float(priced[
+            (priced.capacity_kwh == 0.0) & (priced.year == latest_full)
+        ]["cost_eur"].sum()),
+        "euro_optimum_kwh": float(euro_opt),
+        "annual_saving_eur": float(
+            annual.loc[annual.capacity_kwh == euro_opt, "saving_eur"].sum()),
+        "breakeven_eur_per_kwh": float(
+            annual.loc[annual.capacity_kwh == euro_opt,
+                       "break_even_eur_per_kwh"].sum()),
+        "derived_threshold_kwh_per_kwh":
+            economics.derived_threshold_kwh_per_kwh(
+                float(best["eur_per_kwh"]), HORIZON_YEARS, blended),
+    }
+    arb = economics.arbitrage_ceiling_eur_yr(
+        meter_df, tar, euro_opt or 9.0)
+
     ratio = monthly_ratio(nights_df, pv_nights)
     penalty = resolution_penalty_pct(samples, pv_nights, pv_sweep)
     excluded, worst_month_name = _excluded_in_worst_gap_month(nights_df, gaps)
@@ -260,6 +300,9 @@ def run(repo_root: Path, out_dir: Path) -> dict:
     nights_df.to_csv(out_dir / "meter_night_summary.csv", index=False)
     sweep_df.to_csv(out_dir / "meter_battery_sweep.csv", index=False)
     wall.to_csv(out_dir / "meter_monthly_wall.csv", index=False)
+    tar.bands.to_csv(out_dir / "meter_tariff_bands.csv", index=False)
+    saved.to_csv(out_dir / "meter_economics.csv", index=False)
+    quotes.to_csv(out_dir / "meter_quotes.csv", index=False)
     (out_dir / "meter_report.html").write_text(
         compare_report.build_html(
             nights_df, pv_nights, sweep_df, pv_sweep, sensitivity,
@@ -268,6 +311,12 @@ def run(repo_root: Path, out_dir: Path) -> dict:
             excluded_nights=excluded,
             elbow_overlapping_span=elbow_overlap,
             monthly_wall=wall,
+            tariff_bands=tar.bands,
+            annual_savings=annual,
+            quotes=quotes,
+            economics_summary=econ,
+            arbitrage=arb,
+            horizon_years=HORIZON_YEARS,
             monthly_discharge=discharge,
             coverable_pct=100.0 * coverable,
         )
@@ -283,6 +332,8 @@ def run(repo_root: Path, out_dir: Path) -> dict:
         "elbow_overlapping_span_kwh": float(elbow_overlap),
         "coverable_pct": float(100.0 * coverable),
         "negative_surplus_months": meter_wall.negative_surplus_months(wall),
+        **econ,
+        "arbitrage_ceiling_eur_yr": float(arb["ceiling_eur_yr"]),
         "resolution_penalty_pct": float(penalty),
         "excluded_nights_worst_month": int(excluded),
         "worst_gap_month": worst_month_name,

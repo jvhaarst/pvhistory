@@ -176,3 +176,34 @@ def test_the_headline_tile_discloses_an_unsettled_elbow_either_way(monkeypatch, 
     assert ("nameplate capacity, range across the charge-first / "
             "discharge-first bounds, low end — still climbing where the "
             "sweep stops") in html
+
+
+def _bands():
+    return pd.DataFrame({
+        "band": ["Normaal", "Dal", "SuperDal"],
+        "levering_eur_kwh": [0.30566, 0.27939, 0.18225],
+        "terugleverkosten_eur_kwh": [0.07049, 0.05964, 0.01951],
+        "vergoeding_eur_kwh": [0.08050, 0.06965, 0.02951],
+    })
+
+
+def test_the_tariff_card_states_the_measured_net_export():
+    """The 18-30x spread is the whole economic case, so it must be computed
+    from the band table rather than written beside it."""
+    html = compare_report.tariff_card(_bands())
+    assert "0.010" in html          # the derived net export
+    assert "30.5" in html           # the derived Normaal multiplier
+    assert "0.30566" in html
+
+
+def test_the_tariff_card_moves_with_the_prices():
+    """Halve the import price and the multiplier must halve with it."""
+    bands = pd.DataFrame({
+        "band": ["Only"],
+        "levering_eur_kwh": [0.10],
+        "terugleverkosten_eur_kwh": [0.04],
+        "vergoeding_eur_kwh": [0.05],
+    })
+    html = compare_report.tariff_card(bands)
+    assert "10.0" in html           # 0.10 / 0.01
+    assert "30.5" not in html

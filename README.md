@@ -331,3 +331,112 @@ Near zero is what the mechanism predicts: at night there is no generation to
 cancel against load within an interval, and a power cap in kW binds at the
 same rate whatever the interval length, so coarsening can only blur short
 peaks and daytime charging.
+
+## Battery economics under the 2027 tariff
+
+`analyze_meter.py` prices the capacity sweep against
+`data/Greenchoice - Variabele kosten - 2027`. It is the first real exchange
+rate this analysis has had: every earlier capacity figure traded a stock
+(kWh bought) against a flow (kWh/yr saved) with nothing to convert between
+them.
+
+### There is no net metering left
+
+The tariff gives three prices per band, not one. The feed-in *charge*
+(`terugleverkosten`) claws back all but a cent of the feed-in *payment*
+(`terugleververgoeding`):
+
+| band | when (local) | import €/kWh | net export €/kWh | ratio |
+|---|---|---|---|---|
+| Normaal | 07:00–10:00, 17:00–22:00 | 0.30566 | 0.01001 | 30.5× |
+| Dal | 00:00–07:00, 22:00–24:00; winter 10:00–17:00 | 0.27939 | 0.01001 | 27.9× |
+| SuperDal | summer 10:00–17:00 | 0.18225 | 0.01000 | 18.2× |
+
+A kWh exported earns one cent; the same kWh stored and used later avoids 17
+to 30. **That ratio is the entire economic case for a battery here** — under
+net metering the same hardware would be worth almost nothing.
+
+Bands are wall-clock Amsterdam time, so `pvnight.tariff` is the one place
+this project converts out of UTC. On the real record SuperDal is 15% of
+intervals but carries 18,670 of 26,809 kWh of export — the concentration
+that would smear if the conversion were wrong.
+
+### What it is worth
+
+Priced across the six complete calendar years 2020–2025 (2019 and 2026 are
+partial and excluded, not annualised), the variable bill without a battery
+is **€1,322** in 2025. Savings by capacity:
+
+| capacity | €/yr saved | break-even €/kWh over 10 yr |
+|---|---|---|
+| 5.0 kWh | 285 | 570 |
+| **9.0 kWh** | **369** | **410** |
+| 15.0 kWh | 407 | 271 |
+| 30.0 kWh | 430 | 143 |
+
+Marginal value collapses — €65/yr for the first kWh, €1.50 for the
+thirtieth. A small battery cycles nearly every day; extra capacity only
+helps on rare large-surplus days, and five months of the year have nothing
+to charge from at all (see the winter wall above).
+
+### Against real quotes
+
+Four quotes, gathered 2026-09-05 and held in `pvnight.economics.QUOTES` as a
+dated table so every figure below derives from them:
+
+| product | kWh | € | €/kWh | €/yr | payback | implies optimum |
+|---|---|---|---|---|---|---|
+| BSL B-LFP48-100E 3U | 5.12 | 759.95 | 148.43 | 289 | 5.9 yr | 8.5 kWh |
+| **BSL B-LFP48-200E** | **10.24** | **1,249.95** | **122.07** | **381** | **5.7 yr** | **9.0 kWh** |
+| Dyness PowerBrick Plus | 16.07 | 2,100 | 130.68 | 410 | 7.4 yr | 8.5 kWh |
+| Dyness PowerBrick Plus | 16.07 | 2,650 | 164.90 | 410 | 8.8 yr | 8.0 kWh |
+
+Plus **€942** of hardware that does not scale with capacity — MultiPlus-II
+48/4k5 €769, Class-T fuse and holder €87.50, lugs, cable, DC isolator,
+VE.Bus cable — with the Cerbo GX and P1 feed already owned. That fixed cost
+does not move the optimum, since it is identical at every capacity and
+cancels in the comparison; it only decides whether to build anything at all.
+
+**The euro-optimal capacity is 9.0 kWh** — the same figure phase 3's energy
+elbow reached by an entirely different route, and the same figure the
+cheapest quoted product happens to sit next to. Three independent methods
+agreeing is the strongest evidence in this repository.
+
+### The 50 kWh/yr rule, finally derived
+
+Phase 2 published a 50 kWh/yr-per-kWh threshold that was invented rather
+than derived, and it was removed at the owner's instruction. Derived from
+these prices it is **44.8 kWh/yr** at the cheapest quote over 10 years, and
+30–61 kWh/yr across the four quotes and 10–15 year horizons.
+
+So the guess was close. It was still right to remove it: at the €500/kWh
+this analysis first assumed, the same arithmetic gives 184 kWh/yr, and the
+recommendation would have been wrong by a factor of three. A number that
+happens to land near the truth is not evidence — the derivation is.
+
+### The arbitrage ceiling
+
+Buying at SuperDal and discharging into Normaal is a 12.3 cent gross spread,
+about 10 cents after the round trip. A perfect-foresight upper bound puts it
+at **€157/yr** on top of the €369 self-consumption saving.
+
+Treat that as a ceiling, not a forecast. It assumes a full extra cycle every
+day, ignores that the battery is already storing solar, and uses hindsight
+no real dispatch has. It is also non-zero on only 1,254 days — the summer
+ones, when the battery is already full of sun. Winter's peak-to-off-peak
+spread is *negative* once the round trip is paid (0.30566 − 0.31043). Worth
+its own phase to investigate; not worth counting on.
+
+### What is excluded
+
+Named rather than omitted: standing charges, network tariffs and taxes (they
+do not vary with battery size, so they cancel in every comparison here);
+battery degradation and cycle-life limits (no warranty data — the cycles per
+year are published beside the euro figures so they can be checked against a
+datasheet); and discounting (payback is undiscounted). The 2027 tariff is
+applied to 2020–2026 behaviour, which answers what this household's pattern
+*would* cost under the new contract, not what it did cost.
+
+`out/meter_economics.csv` holds cost and saving per capacity per year,
+`out/meter_tariff_bands.csv` the parsed prices, and `out/meter_quotes.csv`
+each quote against the measured curve.

@@ -220,3 +220,51 @@ def arbitrage_ceiling_eur_yr(meter_df: pd.DataFrame, tariff: Tariff,
         "usable_days": int((spread > 0).sum()),
         "years": float(years),
     }
+
+
+# Real quotes, not assumptions. Gathered 2026-09-05 from the retailers named,
+# ex-VAT, and kept here as one dated table so the report derives every euro
+# figure from them rather than repeating literals. Replace the rows when
+# quotes change; nothing downstream needs editing.
+QUOTES = pd.DataFrame([
+    {"product": "BSL B-LFP48-100E 3U", "kwh": 5.12, "eur": 759.95,
+     "source": "nkon.nl"},
+    {"product": "BSL B-LFP48-200E", "kwh": 10.24, "eur": 1249.95,
+     "source": "nkon.nl"},
+    {"product": "Dyness PowerBrick Plus (low)", "kwh": 16.07, "eur": 2100.00,
+     "source": "ess parts list"},
+    {"product": "Dyness PowerBrick Plus (high)", "kwh": 16.07, "eur": 2650.00,
+     "source": "ess parts list"},
+]).assign(eur_per_kwh=lambda d: d["eur"] / d["kwh"])
+
+# The hardware that does not scale with capacity, from the same parts list:
+# MultiPlus-II 48/4k5 769.00, Class-T holder 42.50, Class-T fuse 45.00,
+# three 35 mm2 lugs 5.94, two metres of 35 mm2 cable 19.38, DC isolator 50.00,
+# VE.Bus cable 10.00. The Cerbo GX and the P1 feed are already owned.
+#
+# It does not move the optimum -- it is identical at every capacity, so it
+# cancels in the argmax -- but it decides whether to build anything at all.
+FIXED_COST_EUR = 941.82
+
+
+def quote_table(annual: pd.DataFrame, fixed_cost_eur: float = FIXED_COST_EUR,
+                years: tuple[float, ...] = (10.0, 15.0)) -> pd.DataFrame:
+    """Each real quote against the measured savings curve.
+
+    One row per product: its price per kWh, the capacity that price implies
+    is optimal, what the product itself would save, and its payback including
+    the fixed hardware.
+    """
+    rows = []
+    for q in QUOTES.itertuples():
+        saving = float(np.interp(q.kwh, annual["capacity_kwh"],
+                                 annual["saving_eur"]))
+        row = {"product": q.product, "kwh": q.kwh, "eur": q.eur,
+               "eur_per_kwh": q.eur_per_kwh, "saving_eur_yr": saving,
+               "payback_yr": payback_years(saving, q.kwh, q.eur_per_kwh,
+                                           fixed_cost_eur)}
+        for y in years:
+            row[f"optimum_kwh_{y:.0f}yr"] = recommend_capacity_eur(
+                annual, q.eur_per_kwh, fixed_cost_eur, y)
+        rows.append(row)
+    return pd.DataFrame(rows)
