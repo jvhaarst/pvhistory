@@ -334,6 +334,12 @@ def elbow_stability(
     installation it reads 6.0 kWh from a 0-10 kWh sweep and settles at 8.0
     once the sweep reaches 25 kWh and the top end has gone flat.
 
+    Settling is not guaranteed, and the caller must not assume it. On phase
+    3's meter-based curve the same table reads 8.5 at 25 and 9.0 at 30 and
+    keeps climbing past the published range — a flat top-end marginal return
+    is not sufficient for the elbow to have stopped moving. Read the last two
+    rows rather than trusting the top-end column.
+
     Publishing this table is the honest alternative to claiming an
     independence the method does not have. A reader can see for themselves
     whether the sweep was carried far enough for the answer to have settled.

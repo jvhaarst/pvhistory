@@ -241,13 +241,21 @@ than assumed. The meter record runs longer than PVOutput's at both ends, so
 PVOutput also covers. It still elbows at 9.0 kWh.
 
 **But 9.0 kWh has not converged, and the page now says so.** The elbow moves
-with where the sweep is truncated — 8.5 kWh at a 25 kWh sweep, 9.0 at 30, and
-it keeps climbing beyond the published range. Phase 2's elbow genuinely
-settled; this one does not. So 9.0 is the *low* reading of a curve that
-supports roughly 8-10 kWh, which is what the convergence table on the report
-page already showed. Nobody is being sized too large by it, but it is a lower
-bound rather than a converged answer, and the only route to a defensible
-single number is a real price per kWh — which is what the retained
+with where the sweep is truncated — 8.5 kWh at a 25 kWh sweep, 9.0 at 30 —
+and it keeps climbing past the published range: 9.5 at 35, 10.0 at 40, 11.0 at
+60, with no sign of settling. Phase 2's elbow genuinely settled at 8.0 across
+its last two truncations; this one does not. So 9.0 kWh is the *low* reading
+of that sequence rather than a converged answer.
+
+A separate reading agrees that no single number is defensible. The report's
+convergence card puts five threshold-free readings of the same curve side by
+side, and they **span 6.5 to 10.0 kWh** — that spread, not any row in it, is
+what the data supports. The two ranges are different measurements and are not
+interchangeable: 9.0-and-climbing is what truncation does to one reading;
+6.5-10.0 is what five different readings do to one sweep.
+
+Nobody is sized too large by 9.0 kWh. But the only route to a defensible
+single number is a real price per kWh, which is what the retained
 `recommend_capacity` is waiting for.
 
 At 9.0 kWh the simulation gives about 36% household

@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from pvnight import compare_report
+from pvnight.battery import elbow_capacity
 from pvnight.compare_report import build_html
 
 
@@ -113,3 +115,64 @@ def test_build_html_survives_an_empty_nights_frame(toy):
     html = build_html(empty, pn, ms, ps, sens, mr, gaps,
                       resolution_penalty_pct=4.2, excluded_nights=0)
     assert html.count("<svg") == 6
+
+
+def _stability(elbows):
+    """A stability table with a chosen elbow per truncation."""
+    tops = [10.0, 15.0, 20.0, 25.0, 30.0][-len(elbows):]
+    return pd.DataFrame({"sweep_top_kwh": tops, "elbow_kwh": elbows,
+                         "top_end_marginal": [1.5] * len(elbows)})
+
+
+def test_stability_caption_says_settled_only_when_the_last_two_rows_agree(monkeypatch):
+    """The caption is derived from the table, not asserted beside it.
+
+    The original sentence claimed the elbow stops moving once the top-end
+    marginal goes flat, printed above a table where it moved on the very last
+    row. Both branches are exercised here because a caption that is only ever
+    checked against one data shape is how that defect survived.
+    """
+    monkeypatch.setattr(compare_report, "elbow_stability",
+                        lambda *a, **k: _stability([8.0, 8.0]))
+    settled = compare_report._elbow_stability_table(pd.DataFrame())
+    assert "stopped moving with the sweep" in settled
+    assert "not</strong> settled" not in settled
+
+    monkeypatch.setattr(compare_report, "elbow_stability",
+                        lambda *a, **k: _stability([8.5, 9.0]))
+    moving = compare_report._elbow_stability_table(pd.DataFrame())
+    assert "not</strong> settled" in moving
+    assert "a longer sweep reads higher" in moving
+    assert "8.5" in moving and "9.0" in moving
+
+
+def test_the_headline_tile_discloses_an_unsettled_elbow_either_way(monkeypatch, toy):
+    """The disclosure must survive a non-degenerate bracket.
+
+    It was first written into the equal-elbows branch only, so a data shape
+    where the two bounds disagree would silently drop a warning the code had
+    already computed.
+    """
+    monkeypatch.setattr(compare_report, "elbow_stability",
+                        lambda *a, **k: _stability([8.5, 9.0]))
+
+    # Bend the discharge-first curve so the two bounds elbow apart. The stock
+    # fixture is degenerate (both 7.0), which is precisely why the original
+    # bug was invisible: the disclosure lived in the equal-elbows branch and
+    # every test took that branch.
+    args = list(toy)
+    ms = args[2].copy()
+    sel = ms["bound"] == "discharge_first"
+    col = "nonev_night_grid_import_kwh_yr"
+    ms.loc[sel, col] = (ms.loc[sel, col].to_numpy()
+                        * np.exp(-ms.loc[sel, "capacity_kwh"].to_numpy() / 10.0))
+    args[2] = ms
+    d = ms[(ms["bound"] == "discharge_first") & (ms["power_kw"] == 3.0)]
+    assert elbow_capacity(d, power_kw=3.0) != 7.0, "fixture no longer splits"
+
+    html = build_html(*args, resolution_penalty_pct=0.0, excluded_nights=1)
+    # Anchor to the TILE's own caption. Asserting the bare phrase matched the
+    # stability card instead, and passed against the unfixed code.
+    assert ("nameplate capacity, range across the charge-first / "
+            "discharge-first bounds, low end — still climbing where the "
+            "sweep stops") in html

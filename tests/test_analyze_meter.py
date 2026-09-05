@@ -96,3 +96,46 @@ def test_pv_shortfall_weighs_months_by_energy():
     assert analyze_meter.pv_shortfall_pct(ratio, 2024) == pytest.approx(
         100.0 * (1.0 - 85.0 / 110.0))
     assert np.isnan(analyze_meter.pv_shortfall_pct(ratio, 2019))
+
+
+def test_overlapping_span_actually_restricts_and_is_not_a_no_op(repo_root):
+    """The span check is only evidence if it really narrows the record.
+
+    A restriction that silently matched everything would return the headline
+    elbow too, and would look like confirmation while checking nothing. So
+    assert the narrowing itself, not just the elbow that comes out.
+    """
+    from pvnight import meter, meter_nights
+    from pvnight.loader import load
+
+    windows = pd.read_csv(repo_root / "out" / "solar_windows.csv",
+                          parse_dates=analyze_meter._WINDOW_DATES)
+    meter_df = meter.load_meter(repo_root / meter.METER_SUBDIR)
+    gaps = meter.find_gaps(meter_df)
+    nights = meter_nights.summarise(meter_df, windows, gaps)
+    samples = load(repo_root / analyze_meter.DATA_SUBDIR)
+
+    lo, hi = samples["ts_utc"].min(), samples["ts_utc"].max()
+    kept = meter_df[(meter_df["ts_utc"] >= lo) & (meter_df["ts_utc"] <= hi)]
+    assert len(kept) < len(meter_df), "the restriction matched the whole record"
+
+    kept_nights = nights[(nights["night_start_utc"] >= lo)
+                         & (nights["night_end_utc"] <= hi)]
+    assert len(kept_nights) < len(nights)
+    # Nights straddling an edge are dropped, not clipped: a half-night would
+    # understate its own consumption and bias the curve it feeds.
+    assert (kept_nights["night_start_utc"] >= lo).all()
+    assert (kept_nights["night_end_utc"] <= hi).all()
+
+
+def test_overlapping_span_returns_nan_when_nothing_overlaps():
+    """No overlap is not the same as agreement, and must not read as 9.0."""
+    ts = pd.date_range("2023-01-01", periods=8, freq="15min", tz="UTC")
+    meter_df = pd.DataFrame({"ts_utc": ts, "import_kwh": 0.2, "export_kwh": 0.0})
+    nights = pd.DataFrame([{"date": ts[0].date(), "night_start_utc": ts[0],
+                            "night_end_utc": ts[-1], "is_ev": False,
+                            "covered": True}])
+    elsewhere = pd.DataFrame({
+        "ts_utc": pd.date_range("2019-01-01", periods=4, freq="5min", tz="UTC")})
+    assert np.isnan(analyze_meter.elbow_on_overlapping_span(
+        meter_df, nights, elsewhere))

@@ -488,11 +488,10 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
     settled_note = ("" if elbow_settled
                     else ", low end — still climbing where the sweep stops")
     capacity_caption = (
-        f"nameplate capacity, the same under both within-interval "
-        f"orderings{settled_note}"
-        if degenerate else
-        "nameplate capacity, range across the charge-first / "
-        "discharge-first bounds")
+        (f"nameplate capacity, the same under both within-interval orderings"
+         if degenerate else
+         "nameplate capacity, range across the charge-first / "
+         "discharge-first bounds") + settled_note)
     penalty_text = format_penalty_pct(resolution_penalty_pct)
 
     # How the penalty should be read depends on its size, so the sentence
@@ -524,7 +523,7 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
         span_caveat = (
             "The two curves cover different spans, and that difference has "
             "not been separated from the difference in source here.")
-    elif elbow_overlapping_span == lo == hi:
+    elif elbow_overlapping_span == lo:
         span_caveat = (
             "The two records cover different spans, so the meter sweep was "
             "re-run over nothing but the dates PVOutput also covers: it "
