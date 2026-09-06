@@ -17,6 +17,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from . import economics
+
 # Every rate the model uses, declared once with its provenance. Nothing may
 # reach the report except through here -- these three numbers decide the
 # answer, so a reader must be able to see and challenge all of them at once.
@@ -41,11 +43,33 @@ DEGRADATION = _rate("degradation")
 INFLATION = _rate("inflation")
 DISCOUNT = _rate("discount")
 
-# The purchase, from phase 4's quote table and parts list, including 21% VAT
-# because a household cannot reclaim it.
+# The purchase, derived from phase 4's quote table and parts list rather than
+# retyped, so the two pages cannot drift apart on what the hardware costs.
 BATTERY = "BSL B-LFP48-200E"
-CAPACITY_KWH = 10.24
-COST_EUR = 2652.04
+_QUOTE = economics.QUOTES.set_index("product").loc[BATTERY]
+CAPACITY_KWH = float(_QUOTE["kwh"])
+BATTERY_EUR = float(_QUOTE["eur"])
+FIXED_EUR = float(economics.FIXED_COST_EUR)
+VAT_RATE = float(economics.VAT_RATE)
+COST_EX_VAT_EUR = BATTERY_EUR + FIXED_EUR
+COST_EUR = economics.incl_vat(COST_EX_VAT_EUR)
+
+
+def purchase_table() -> pd.DataFrame:
+    """What is being bought, itemised, ex- and incl-VAT.
+
+    A household cannot reclaim VAT, so the inclusive figure is what the
+    decision is actually made against; the exclusive one is shown because
+    that is how retailers quote.
+    """
+    rows = [
+        {"item": f"{BATTERY} — {CAPACITY_KWH:.2f} kWh", "ex_vat": BATTERY_EUR},
+        {"item": "Victron inverter and DC hardware", "ex_vat": FIXED_EUR},
+    ]
+    out = pd.DataFrame(rows)
+    out.loc[len(out)] = {"item": "total", "ex_vat": out["ex_vat"].sum()}
+    out["incl_vat"] = out["ex_vat"] * (1.0 + VAT_RATE)
+    return out
 
 
 def cashflows(saving_curve: pd.DataFrame, capacity_kwh: float,

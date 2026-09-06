@@ -85,6 +85,49 @@ def _assumptions_table(assumptions: pd.DataFrame) -> str:
             f"<tbody>{rows}</tbody></table></div>")
 
 
+
+def _purchase_table(purchase: pd.DataFrame, vat_rate: float) -> str:
+    head = "".join(f"<th>{h}</th>" for h in
+                   ["what is bought", "ex-VAT", f"incl. {vat_rate:.0%} VAT"])
+    rows = "".join(
+        (f"<tr><td><strong>{r.item}</strong></td>"
+         f"<td><strong>€{r.ex_vat:,.2f}</strong></td>"
+         f"<td><strong>€{r.incl_vat:,.2f}</strong></td></tr>"
+         if r.item == "total" else
+         f"<tr><td>{r.item}</td><td>€{r.ex_vat:,.2f}</td>"
+         f"<td>€{r.incl_vat:,.2f}</td></tr>")
+        for r in purchase.itertuples())
+    return (f'<div class="chart"><table><thead><tr>{head}</tr></thead>'
+            f"<tbody>{rows}</tbody></table></div>")
+
+
+def _inputs_card(purchase: pd.DataFrame, assumptions: pd.DataFrame,
+                 vat_rate: float, measured_saving: float,
+                 capacity_kwh: float, headline_years: int) -> str:
+    """Everything that goes in, before anything that comes out.
+
+    The page previously opened with its conclusions and left the three rates
+    that determine them buried in the third card. A reader cannot judge a
+    verdict without first seeing what it was computed from.
+    """
+    return (
+        '<p class="sub">Two kinds of input, and they are not equally solid. '
+        "The prices are quotes and the saving is measured; the three rates "
+        "below are assumptions, and they decide the answer.</p>"
+        + _purchase_table(purchase, vat_rate)
+        + '<p class="sub">The saving comes from the meter-based sizing '
+        f"analysis: <strong>€{measured_saving:,.0f} per year</strong> at "
+        f"{capacity_kwh:.2f} kWh, at today's prices, averaged over the "
+        "complete calendar years in the record. It is read from that page's "
+        "output rather than recomputed here, so the two cannot disagree.</p>"
+        + _assumptions_table(assumptions)
+        + '<p class="sub">Everything is nominal: a nominal alternative '
+        "return discounts nominal savings that inflate, so deflating the "
+        "savings as well would count inflation twice. The battery is assumed "
+        f"worthless after {headline_years} years and no residual value is "
+        "credited.</p>")
+
+
 def _horizon_table(sweep: pd.DataFrame, discount: float) -> str:
     head = "".join(f"<th>{h}</th>" for h in
                    ["assumed life", f"NPV at {discount:.0%}", "implied return"])
@@ -122,8 +165,16 @@ def _verdict(sweep: pd.DataFrame, headline_years: int, discount: float,
 def build_html(assumptions: pd.DataFrame, cf: pd.DataFrame,
                sweep: pd.DataFrame, sens: pd.DataFrame, headline_years: int,
                discount: float, battery: str, capacity_kwh: float,
-               cost_eur: float, saving_year_one: float) -> str:
-    """Assemble the page. No document wrapper — the host supplies it."""
+               cost_eur: float, saving_year_one: float,
+               purchase: pd.DataFrame, vat_rate: float = 0.21) -> str:
+    """Assemble the page. No document wrapper — the host supplies it.
+
+    `purchase` is required, not optional. An earlier draft let it default to
+    None, which meant the page could render with its verdict intact and its
+    assumptions missing entirely — the reader would see a confident 14.2%
+    with nothing to judge it against. A page that can omit its own inputs is
+    the wrong shape for this question.
+    """
     be = break_even_year(sweep)
     stats = [
         (f"{sweep[sweep.years == headline_years].implied_return.iloc[0]:.1%}",
@@ -138,19 +189,14 @@ def build_html(assumptions: pd.DataFrame, cf: pd.DataFrame,
         f'<div class="stat"><b>{v}</b><span>{k}</span></div>' for v, k in stats)
 
     cards = [
+        ("What goes in",
+         _inputs_card(purchase, assumptions, vat_rate, saving_year_one,
+                      capacity_kwh, headline_years),
+         ""),
         ("The verdict",
          _verdict(sweep, headline_years, discount, battery, capacity_kwh,
                   cost_eur),
          chart_horizon(sweep, discount) + _horizon_table(sweep, discount)),
-        ("What it rests on",
-         "Three assumed rates decide this answer, and none of them is a "
-         "measurement. They are listed rather than argued for; the "
-         "sensitivity below shows how far each can move the result. "
-         "Everything is nominal — a nominal alternative return discounts "
-         "nominal savings that inflate, and deflating the savings as well "
-         "would count inflation twice."
-         + _assumptions_table(assumptions),
-         ""),
         ("Year by year",
          "The saving rises with energy prices and falls as the battery "
          "ages, and discounting pulls the later years down hardest. "

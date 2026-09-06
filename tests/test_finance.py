@@ -161,16 +161,28 @@ def test_the_page_states_the_verdict_and_its_own_fragility(flat_curve):
     sens = finance.sensitivity(flat_curve, 10.0, 600.0, 15)
     html = investment_report.build_html(
         finance.ASSUMPTIONS, cf, sweep, sens, 15, 0.10, "Test cell", 10.0,
-        600.0, 100.0)
+        600.0, 100.0, purchase=finance.purchase_table())
 
     text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))
     be = finance.break_even_year(sweep)
     assert f"first pulls ahead at {be} years" in text
     assert "Test cell" in text
-    # Every assumption is on the page with its provenance.
+    # Every assumption is on the page with its provenance, and the inputs
+    # appear before the verdict that rests on them.
     for label in finance.ASSUMPTIONS["label"]:
         assert label in text
     assert "owner's assumption" in text
+    assert text.index("What goes in") < text.index("The verdict")
+
+
+def test_the_page_cannot_be_built_without_its_inputs():
+    """A verdict with no visible assumptions is the failure this page risks."""
+    from pvnight import investment_report
+
+    with pytest.raises(TypeError):
+        investment_report.build_html(
+            finance.ASSUMPTIONS, pd.DataFrame(), pd.DataFrame(),
+            pd.DataFrame(), 15, 0.10, "Test cell", 10.0, 600.0, 100.0)
 
 
 def test_the_verdict_flips_when_the_investment_loses(flat_curve):
@@ -185,6 +197,6 @@ def test_the_verdict_flips_when_the_investment_loses(flat_curve):
     sens = finance.sensitivity(flat_curve, 10.0, 5000.0, 15)
     text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", investment_report.build_html(
         finance.ASSUMPTIONS, cf, sweep, sens, 15, 0.10, "Test cell", 10.0,
-        5000.0, 100.0)))
+        5000.0, 100.0, purchase=finance.purchase_table())))
     assert "loses to" in text
     assert "never pulls ahead" in text

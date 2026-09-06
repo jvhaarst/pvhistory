@@ -59,7 +59,8 @@ def run(repo_root: Path, out_dir: Path) -> dict:
         investment_report.build_html(
             finance.ASSUMPTIONS, cf, sweep, sens, HEADLINE_YEARS,
             finance.DISCOUNT, finance.BATTERY, finance.CAPACITY_KWH,
-            finance.COST_EUR, measured_saving))
+            finance.COST_EUR, measured_saving,
+            purchase=finance.purchase_table(), vat_rate=finance.VAT_RATE))
 
     row = sweep[sweep["years"] == HEADLINE_YEARS].iloc[0]
     return {
