@@ -519,3 +519,53 @@ household's pattern *would* cost under the new contract, not what it did cost.
 `out/meter_economics.csv` holds cost and saving per capacity per year,
 `out/meter_tariff_bands.csv` the parsed prices, and `out/meter_quotes.csv`
 each quote against the measured curve, with both VAT treatments.
+
+## Is the battery worth buying?
+
+`analyze_investment.py` answers a different question from every section
+above. Those ask what size to buy; this asks whether to buy at all, for
+hardware already chosen, against the alternative of leaving the money
+invested. Run it after `analyze_meter.py` — it reads that page's
+`out/meter_economics.csv` rather than recomputing the saving, so the two
+cannot disagree.
+
+**The purchase.** A BSL B-LFP48-200PW, 10.24 kWh, at €1,399.95, plus €941.82
+of Victron inverter and DC hardware: **€2,341.77 ex-VAT, €2,833.54 including
+21%**. Of that hardware total, €79.38 ex-VAT is assumed rather than quoted —
+the parts list gives a price per unit but no cable length, marks the DC
+isolator optional, and notes the VE.Bus cable may already be in the box. That
+uncertainty is larger than the margin the ten-year case turns on, so the page
+names the three terms.
+
+**The assumptions**, all declared in `finance.ASSUMPTIONS` with a source:
+degradation 1.5%/yr, energy price rise 3%/yr and an alternative return of
+10%/yr are the owner's; the 10-year warranty, >15-year design life and 6,000
+cycle life come from the BSL datasheet. Cycles are not the binding limit — at
+the measured ~155 cycles a year that is about 39 years — so calendar life
+decides.
+
+**The answer depends on which lifetime you believe, and the datasheet gives
+two that disagree:**
+
+| assumed life | source | NPV at 10% | implied return | achieved at 10% |
+|---|---|---|---|---|
+| 10 years | warranty | **−€297** | 7.6% | 8.8% |
+| 15 years | design life | **+€444** | 12.5% | 11.1% |
+
+It first pulls ahead at **12 years**. Two returns are quoted because they
+answer different questions: the *implied* return is the rate at which the
+purchase breaks even and assumes each saving is reinvested at that same rate,
+which nobody can do; the *achieved* return reinvests at the 10% actually on
+offer and is the one to compare. Both agree on the verdict at every horizon.
+
+Everything is nominal — a nominal alternative discounts nominal savings that
+inflate — and year one is not inflated, because the saving is priced against
+the 2027 tariff and the battery is installed in 2027. Residual value is zero
+even though the pack still holds about 86% of nameplate after ten years.
+Not modelled and cutting the other way: panel degradation, drift in household
+consumption, and eventual inverter replacement.
+
+`out/battery_investment.html` is the page; `out/investment_cashflow.csv`,
+`out/investment_horizons.csv` and `out/investment_sensitivity.csv` are its
+tables. Like the other reports the HTML is a build artefact and is
+git-ignored.

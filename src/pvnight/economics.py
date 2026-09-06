@@ -247,6 +247,10 @@ QUOTES = pd.DataFrame([
      "source": "nkon.nl"},
     {"product": "BSL B-LFP48-200E", "kwh": 10.24, "eur": 1249.95,
      "source": "nkon.nl"},
+    # The wall-mounted variant, and the one actually being bought. Its
+    # datasheet is what phase 4b's warranty and design life are cited from.
+    {"product": "BSL B-LFP48-200PW", "kwh": 10.24, "eur": 1399.95,
+     "source": "nkon.nl"},
     {"product": "Dyness PowerBrick Plus (low)", "kwh": 16.07, "eur": 2100.00,
      "source": "ess parts list"},
     {"product": "Dyness PowerBrick Plus (high)", "kwh": 16.07, "eur": 2650.00,
