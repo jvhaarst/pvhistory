@@ -62,6 +62,12 @@ class Tariff:
         and SuperDal is a 12.3 cent/kWh error landing systematically in summer
         afternoons, the largest block of export in the record.
         """
+        # Meter timestamps label the interval END, so the quarter hour
+        # 09:45-10:00 is read at 10:00 and priced as the 10:00 band. That
+        # shifts 4.17% of intervals (one per band boundary per day) by one
+        # band. Measured on the real record: EUR 1.79 on a EUR 1,322 bill,
+        # 0.13%. Left as-is because correcting it would misalign these
+        # timestamps against every other module, which all read the label.
         local = pd.DatetimeIndex(ts_utc).tz_convert(SITE_TZ)
         summer = ((local.month >= 4) & (local.month <= 9)).astype(int)
         return self.hour_map[summer, local.hour]
@@ -121,6 +127,17 @@ def load_tariff(path: Path) -> Tariff:
         raise ValueError(f"tariff: bands are missing prices {missing}")
     if parsed[list(_PRICE_COL.values())].isna().any().any():
         raise ValueError("tariff: at least one band is missing a price")
+
+    # A band name may appear once per season. Taking `.first()` would silently
+    # drop a season-specific price and point every winter hour at the summer
+    # rate — the exact kind of silent hole this parser promises not to have.
+    for col in _PRICE_COL.values():
+        varies = parsed.groupby("band")[col].nunique()
+        bad = varies[varies > 1]
+        if len(bad):
+            raise ValueError(
+                f"tariff: {list(bad.index)} price {col} differs between "
+                "seasons; this parser assumes one price per band name")
 
     bands = (parsed.groupby("band", as_index=False)[list(_PRICE_COL.values())]
              .first()

@@ -31,6 +31,9 @@ from pvnight.loader import load
 CAPACITIES = np.arange(0.0, 30.01, 0.5)
 POWER_KWS = (2.5, 3.0, 3.7)
 REPORT_POWER_KW = 3.0
+# A choice, not a measurement: LFP warranties commonly run 10 years, so that
+# is the horizon the page leads with. It is a live lever -- at 15 years the
+# optimum moves up half a step -- so the quote table publishes both.
 HORIZON_YEARS = 10.0
 
 # PVOutput samples every five minutes; the meter every fifteen. Three of the
@@ -274,7 +277,11 @@ def run(repo_root: Path, out_dir: Path) -> dict:
     euro_opt = economics.recommend_capacity_eur(
         annual, float(best["eur_per_kwh"]), economics.FIXED_COST_EUR,
         HORIZON_YEARS)
-    blended = economics.blended_value_eur_per_kwh(priced, euro_opt or 9.0)
+    if euro_opt <= 0:
+        raise ValueError(
+            "no capacity pays back at the cheapest quote; the euro figures "
+            "below would describe a battery the analysis says not to buy")
+    blended = economics.blended_value_eur_per_kwh(priced, euro_opt)
     latest_full = int(complete["year"].max())
     econ = {
         "no_battery_cost_eur": float(priced[
@@ -290,8 +297,7 @@ def run(repo_root: Path, out_dir: Path) -> dict:
             economics.derived_threshold_kwh_per_kwh(
                 float(best["eur_per_kwh"]), HORIZON_YEARS, blended),
     }
-    arb = economics.arbitrage_ceiling_eur_yr(
-        meter_df, tar, euro_opt or 9.0)
+    arb = economics.arbitrage_ceiling_eur_yr(meter_df, tar, euro_opt)
 
     ratio = monthly_ratio(nights_df, pv_nights)
     penalty = resolution_penalty_pct(samples, pv_nights, pv_sweep)
@@ -317,6 +323,11 @@ def run(repo_root: Path, out_dir: Path) -> dict:
             economics_summary=econ,
             arbitrage=arb,
             horizon_years=HORIZON_YEARS,
+            vat_rate=economics.VAT_RATE,
+            priced=priced,
+            fixed_cost_terms=economics.FIXED_COST_TERMS,
+            fixed_cost_eur=economics.FIXED_COST_EUR,
+            best_eur_per_kwh=float(best["eur_per_kwh"]),
             monthly_discharge=discharge,
             coverable_pct=100.0 * coverable,
         )

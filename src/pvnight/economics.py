@@ -20,22 +20,38 @@ from .config import SITE_TZ
 from .tariff import Tariff
 
 
-def full_years(ts_utc) -> set[int]:
-    """Calendar years the record covers end to end.
+def full_years(ts_utc, tolerance: float = 0.999) -> set[int]:
+    """Calendar years the record covers end to end AND without holes.
 
-    Derived from the span rather than hardcoded. A first draft pinned this to
-    a literal `2026-01-01`, which silently admitted **2019** — the record
-    opens at 2019-12-31 23:15 UTC, so that "year" holds three intervals and a
-    EUR 0.03 bill. Averaging EUR/yr across it diluted every saving by a
-    seventh. A literal cutoff would also rot the moment new data arrived.
+    Two ways to not be a full year, and both have bitten this analysis:
+
+    - **Span.** A first draft pinned the cutoff to a literal `2026-01-01`,
+      which silently admitted 2019 — the record opens at 2019-12-31 23:15
+      UTC, so that "year" holds three intervals and a EUR 0.03 bill, and
+      averaging EUR/yr across it diluted every saving by a seventh.
+    - **Holes.** Spanning a year is not covering it. 2024 spans fine but is
+      missing 672 intervals — seven midwinter days from the January outage,
+      in the season that dominates a battery answer. Counted as whole it
+      understates that year's bill, and moves the published optimum by half
+      a step.
+
+    A year is complete when it holds at least `tolerance` of the intervals
+    its length implies, at the record's own median spacing.
     """
     idx = pd.DatetimeIndex(ts_utc)
     lo, hi = idx.min(), idx.max()
+    dt = pd.Series(idx).diff().median()
+    if pd.isna(dt) or dt <= pd.Timedelta(0):
+        return set()
     out = set()
     for y in range(int(lo.year), int(hi.year) + 1):
         start = pd.Timestamp(f"{y}-01-01", tz="UTC")
         end = pd.Timestamp(f"{y + 1}-01-01", tz="UTC")
-        if lo <= start and hi >= end - pd.Timedelta(days=1):
+        if not (lo <= start and hi >= end - dt):
+            continue
+        expected = (end - start) / dt
+        got = int(((idx >= start) & (idx < end)).sum())
+        if got >= tolerance * expected:
             out.add(y)
     return out
 
@@ -246,6 +262,27 @@ QUOTES = pd.DataFrame([
 # cancels in the argmax -- but it decides whether to build anything at all.
 FIXED_COST_EUR = 941.82
 
+# Which terms of that sum are sourced and which are not. The parts list gives
+# per-unit prices; only some carry counts, so this names what is a reading and
+# what is a judgement rather than letting EUR 941.82 look uniformly solid.
+FIXED_COST_TERMS = pd.DataFrame([
+    {"item": "MultiPlus-II 48/4k5/55-32", "eur": 769.00, "basis": "quoted"},
+    {"item": "Class-T fuse holder 110-200 A", "eur": 42.50, "basis": "quoted"},
+    {"item": "Class-T fuse 125 A", "eur": 45.00, "basis": "quoted"},
+    {"item": "3 x 35 mm2 lug", "eur": 5.94, "basis": "quoted (list states M6x2 + M8x1)"},
+    {"item": "2 m of 35 mm2 cable", "eur": 19.38, "basis": "ASSUMED length"},
+    {"item": "DC isolator", "eur": 50.00, "basis": "ASSUMED needed (list says optional)"},
+    {"item": "VE.Bus cable", "eur": 10.00, "basis": "ASSUMED (may ship with the Cerbo)"},
+])
+
+# Retailers quote ex-VAT; a household cannot reclaim it, so what is actually
+# paid is the inclusive figure. Named here so a rate change is one edit.
+VAT_RATE = 0.21
+
+
+def incl_vat(eur: float, rate: float = VAT_RATE) -> float:
+    return float(eur * (1.0 + rate))
+
 
 def quote_table(annual: pd.DataFrame, fixed_cost_eur: float = FIXED_COST_EUR,
                 years: tuple[float, ...] = (10.0, 15.0)) -> pd.DataFrame:
@@ -259,10 +296,15 @@ def quote_table(annual: pd.DataFrame, fixed_cost_eur: float = FIXED_COST_EUR,
     for q in QUOTES.itertuples():
         saving = float(np.interp(q.kwh, annual["capacity_kwh"],
                                  annual["saving_eur"]))
+        total_ex = q.eur + fixed_cost_eur
+        total_in = incl_vat(total_ex)
         row = {"product": q.product, "kwh": q.kwh, "eur": q.eur,
                "eur_per_kwh": q.eur_per_kwh, "saving_eur_yr": saving,
+               "total_ex_vat": total_ex, "total_incl_vat": total_in,
                "payback_yr": payback_years(saving, q.kwh, q.eur_per_kwh,
-                                           fixed_cost_eur)}
+                                           fixed_cost_eur),
+               "payback_yr_incl_vat": (total_in / saving if saving > 0
+                                       else float("inf"))}
         for y in years:
             row[f"optimum_kwh_{y:.0f}yr"] = recommend_capacity_eur(
                 annual, q.eur_per_kwh, fixed_cost_eur, y)

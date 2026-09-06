@@ -93,3 +93,26 @@ def test_a_malformed_file_raises_rather_than_returning_half_a_tariff(tmp_path):
                    "        Terugleververgoeding    € 0,08050 per kWh\n")
     with pytest.raises(ValueError, match="tile"):
         load_tariff(bad)
+
+
+def test_a_season_specific_price_raises_rather_than_being_dropped(tmp_path):
+    """Grouping by band name alone would point winter at the summer rate.
+
+    The 2027 file happens to price each band identically in both seasons, so
+    nothing here would have failed — which is exactly why it needs a guard
+    rather than a comment.
+    """
+    f = tmp_path / "tariff.txt"
+    f.write_text(
+        "Zomer (1 april t/m 30 september)\n"
+        "    Normaal zomer (00:00 - 24:00)\n"
+        "        Leveringskosten         € 0,30566 per kWh\n"
+        "        Terugleverkosten        € 0,07049 per kWh\n"
+        "        Terugleververgoeding    € 0,08050 per kWh\n"
+        "Winter (1 oktober t/m 31 maart)\n"
+        "    Normaal winter (00:00 - 24:00)\n"
+        "        Leveringskosten         € 0,40000 per kWh\n"
+        "        Terugleverkosten        € 0,07049 per kWh\n"
+        "        Terugleververgoeding    € 0,08050 per kWh\n")
+    with pytest.raises(ValueError, match="differs between"):
+        load_tariff(f)
