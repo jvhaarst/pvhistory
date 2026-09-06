@@ -1,21 +1,54 @@
 # pvnight
 
-This repository determines, for every calendar date from 2020 through 2026, the
-window in which solar generation is physically possible at a PV installation in
-the Netherlands, fitted from six years of PVOutput history. "Night" is defined
-as the complement of that window: the period during which any measured
-consumption is unambiguously household draw, not solar shortfall.
+Four analyses of one home PV installation in the Netherlands, built from six
+years of five-minute PVOutput history and fifteen-minute smart-meter data.
+They were written in order and each changed the answer the previous had
+reached — including one that found a hardware fault which invalidated an
+entire phase.
+
+**Reports: https://jvhaarst.github.io/pvhistory/**
+
+1. **The solar window.** For every date from 2020 through 2026, when solar
+   generation is physically possible, fitted from measured generation rather
+   than taken from an almanac. "Night" is the complement of that window: the
+   period during which any measured consumption is unambiguously household
+   draw, not solar shortfall.
+2. **Night consumption and battery sizing** from PVOutput's consumption
+   channel — **superseded**, see the limitation below.
+3. **The same, rebuilt on the smart meter**, which measures what actually
+   crosses the grid connection, then priced against a real 2027 tariff.
+4. **Whether the chosen battery is worth buying** at all, against leaving the
+   money invested elsewhere.
+
+The measurements themselves are not published. The derived tables in `out/`
+are, and the reports are built from those.
 
 ## Running it
 
+Five entry points, in dependency order — each reads the previous one's
+output, so run them in this sequence after a data refresh:
+
 ```
-uv run python analyze.py
+uv run python analyze.py             # solar windows          -> phase 1
+uv run python analyze_night.py       # PVOutput night+battery -> phase 2
+uv run python analyze_meter.py       # meter night+battery+€  -> phase 3 & 4
+uv run python analyze_investment.py  # the purchase decision  -> phase 4b
+uv run python build_site.py          # copy reports into docs/ for Pages
 ```
 
-This loads the PVOutput history parquet files from `data/pvoutput/`, fits the
-seasonal elevation-threshold envelope, and writes three files to `out/`:
-`solar_thresholds.csv`, `solar_windows.csv`, and `report.html`. Run
-`uv run pytest` to run the test suite.
+`analyze.py` loads the PVOutput history from `data/pvoutput/`, fits the
+seasonal elevation-threshold envelope, and writes `solar_thresholds.csv`,
+`solar_windows.csv` and `report.html`. Each later script depends on the
+earlier ones' CSVs rather than recomputing them, so the pages cannot disagree
+with each other.
+
+`uv run pytest` runs the suite.
+
+**The inputs are not in the repository.** `data/` holds personal
+measurements — the PVOutput exports, the smart-meter exports, the tariff
+sheet and the hardware parts list — and is git-ignored by decision. Without
+them the analysis scripts cannot run, though the committed outputs in `out/`
+and the published reports remain readable.
 
 ## Outputs
 
@@ -58,11 +91,17 @@ See `docs/superpowers/specs/2026-09-03-solar-window-design.md` for the full
 design: why an elevation-threshold model, how the seasonal fit works, and the
 established facts about the source data that drove those choices.
 
-## Night consumption and battery sizing
+## Night consumption and battery sizing (superseded)
 
 ```
 uv run python analyze_night.py
 ```
+
+> **These figures are superseded.** They come from PVOutput's consumption
+> channel, which was later measured to have lost about a quarter of the
+> household load from December 2022 — see the meter section below. The method
+> is sound and the section is kept for comparison, but the night consumption
+> is understated and so is the battery it implies.
 
 This joins household consumption against the night boundaries in
 `out/solar_windows.csv`, classifies each night as ordinary or EV-charging,
@@ -396,9 +435,13 @@ what is actually paid at 21%:
 | product | kWh | battery € | €/kWh | €/yr | total incl. VAT | payback incl. | payback ex-VAT |
 |---|---|---|---|---|---|---|---|
 | BSL B-LFP48-100E 3U | 5.12 | 759.95 | 148.43 | 291 | €2,059 | 7.1 yr | 5.8 yr |
-| **BSL B-LFP48-200E** | **10.24** | **1,249.95** | **122.07** | **374** | **€2,652** | **7.1 yr** | **5.9 yr** |
+| BSL B-LFP48-200E | 10.24 | 1,249.95 | 122.07 | 374 | €2,652 | 7.1 yr | 5.9 yr |
+| **BSL B-LFP48-200PW** | **10.24** | **1,399.95** | **136.71** | **374** | **€2,834** | **7.6 yr** | **6.3 yr** |
 | Dyness PowerBrick Plus | 16.07 | 2,100 | 130.68 | 398 | €3,681 | 9.3 yr | 7.6 yr |
 | Dyness PowerBrick Plus | 16.07 | 2,650 | 164.90 | 398 | €4,346 | 10.9 yr | 9.0 yr |
+
+The **200PW** is the wall-mounted model and the one being bought; the 200E is
+the cheaper variant per kWh and is what the sizing above is measured against.
 
 Plus **€942 ex-VAT** of hardware that does not scale with capacity. Four of
 its seven terms are quoted with counts; three are assumptions, and
@@ -443,8 +486,8 @@ by eye rather than by the rule — the ninth time in this repository that a
 hand-written number disagreed with the computed one beside it.)
 
 So the honest reading is **8.5–9.5 kWh depending on horizon**, and the BSL
-B-LFP48-200E at 10.24 kWh sits just above that band while being the cheapest
-per kWh of the four quotes.
+B-LFP48-200PW at 10.24 kWh sits just above that band. The 200E is cheaper per
+kWh and sets the sizing; the PW is the model chosen.
 
 **Depth of discharge is now sourced, not assumed.** Phase 2 used 90% with no
 citation and phases 3 and 4 inherited it; both products actually under
@@ -520,23 +563,6 @@ household's pattern *would* cost under the new contract, not what it did cost.
 `out/meter_tariff_bands.csv` the parsed prices, and `out/meter_quotes.csv`
 each quote against the measured curve, with both VAT treatments.
 
-## The published site
-
-`build_site.py` copies the four reports out of `out/` into `docs/` and writes
-an index that describes each and flags which are superseded. GitHub Pages
-serves `docs/` from `main`:
-
-```
-uv run python analyze.py && uv run python analyze_night.py
-uv run python analyze_meter.py && uv run python analyze_investment.py
-uv run python build_site.py
-```
-
-It copies rather than regenerates, and fails loudly if a report is missing,
-so the site can never quietly disagree with `out/`. Nothing republishes
-without running it — the analysis needs the private inputs in `data/`, which
-are not in the repository, so this cannot be automated in CI.
-
 ## Is the battery worth buying?
 
 `analyze_investment.py` answers a different question from every section
@@ -586,3 +612,20 @@ consumption, and eventual inverter replacement.
 `out/investment_horizons.csv` and `out/investment_sensitivity.csv` are its
 tables. Like the other reports the HTML is a build artefact and is
 git-ignored.
+
+## The published site
+
+`build_site.py` copies the four reports out of `out/` into `docs/` and writes
+an index that describes each and flags which are superseded. GitHub Pages
+serves `docs/` from `main`:
+
+```
+uv run python analyze.py && uv run python analyze_night.py
+uv run python analyze_meter.py && uv run python analyze_investment.py
+uv run python build_site.py
+```
+
+It copies rather than regenerates, and fails loudly if a report is missing,
+so the site can never quietly disagree with `out/`. Nothing republishes
+without running it — the analysis needs the private inputs in `data/`, which
+are not in the repository, so this cannot be automated in CI.
