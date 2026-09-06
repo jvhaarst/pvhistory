@@ -20,6 +20,22 @@ from .finance import break_even_year  # noqa: E402
 from .night_report import TABLE_CSS  # noqa: E402
 from .report import FURNITURE, SERIES, STYLE, _svg  # noqa: E402
 
+def _spread_phrase() -> str:
+    """The import-to-export ratio, read from the tariff rather than typed.
+
+    An earlier version said "17 to 30 times". The tariff gives 18.2 to 30.5,
+    so the sentence understated both ends of the number the whole case rests
+    on — while sitting beside a table that shows it.
+    """
+    from pathlib import Path
+
+    from .tariff import TARIFF_FILE, load_tariff
+
+    t = load_tariff(Path(TARIFF_FILE))
+    r = t.bands["levering_eur_kwh"].to_numpy() / t.net_export_eur_kwh
+    return f"{r.min():.1f} to {r.max():.1f} times"
+
+
 RATE_LABEL = {"degradation": "battery degradation",
               "inflation": "energy price rise",
               "discount": "alternative return"}
@@ -103,18 +119,36 @@ def _purchase_table(purchase: pd.DataFrame, vat_rate: float) -> str:
 
 def _inputs_card(purchase: pd.DataFrame, assumptions: pd.DataFrame,
                  vat_rate: float, measured_saving: float,
-                 capacity_kwh: float, headline_years: int) -> str:
+                 capacity_kwh: float, headline_years: int,
+                 terms: pd.DataFrame) -> str:
     """Everything that goes in, before anything that comes out.
 
     The page previously opened with its conclusions and left the three rates
     that determine them buried in the third card. A reader cannot judge a
     verdict without first seeing what it was computed from.
     """
+    assumed = terms[terms["basis"].str.startswith("ASSUMED")]
+    assumed_ex = float(assumed["eur"].sum())
+    assumed_html = "".join(
+        f"<li>€{t.eur:,.2f} — {t.item} "
+        f"({t.basis.replace('ASSUMED', 'assumed').lower()})</li>"
+        for t in assumed.itertuples())
     return (
         '<p class="sub">Two kinds of input, and they are not equally solid. '
-        "The prices are quotes and the saving is measured; the three rates "
-        "below are assumptions, and they decide the answer.</p>"
+        "The battery price is a quote and the saving is measured; the rates "
+        "below are assumptions, and so is part of the hardware cost.</p>"
         + _purchase_table(purchase, vat_rate)
+        + ('<p class="sub">Of the hardware total, '
+           f"<strong>€{assumed_ex:,.2f}</strong> ex-VAT "
+           f"(<strong>€{assumed_ex * (1 + vat_rate):,.2f}</strong> including "
+           "VAT) is assumed rather than quoted — the parts list gives a price "
+           "per unit but no quantity, marks one item optional, and notes "
+           "another may already be in the box:</p>"
+           f"<ul>{assumed_html}</ul>"
+           '<p class="sub">That is larger than the margin by which the '
+           "ten-year case is decided, so it is named here rather than folded "
+           "into a single hardware line. Removing all three would improve "
+           "every figure below.</p>" if len(assumed) else "")
         + '<p class="sub">The saving comes from the meter-based sizing '
         f"analysis: <strong>€{measured_saving:,.0f} per year</strong> at "
         f"{capacity_kwh:.2f} kWh, at today's prices, averaged over the "
@@ -140,10 +174,30 @@ def _horizon_table(sweep: pd.DataFrame, discount: float) -> str:
 
 
 def _verdict(sweep: pd.DataFrame, headline_years: int, discount: float,
-             battery: str, capacity_kwh: float, cost_eur: float) -> str:
-    """The answer, with its own fragility stated in the same breath."""
-    row = sweep[sweep["years"] == headline_years].iloc[0]
+             battery: str, capacity_kwh: float, cost_eur: float,
+             warranty_years: int = 0, design_life_years: int = 0,
+             cycle_years: float = 0.0) -> str:
+    """The answer at both lifetimes the manufacturer states.
+
+    An earlier version led with a single 15-year figure that had no source
+    at all — and 15 rather than 10 is exactly what turns this from a loss
+    into a win. The datasheet gives two lifetimes and they disagree about the
+    verdict, so both are published.
+    """
     be = break_even_year(sweep)
+    lines = []
+    for y, label in ((warranty_years, "warranty"),
+                     (design_life_years, "design life")):
+        r = sweep[sweep["years"] == y]
+        if len(r):
+            r = r.iloc[0]
+            lines.append(
+                f"<li>At the <strong>{y}-year {label}</strong>: "
+                f"{'ahead by' if r.npv_eur >= 0 else 'behind by'} "
+                f"<strong>€{abs(r.npv_eur):,.0f}</strong>, "
+                f"an implied return of <strong>{r.implied_return:.1%}</strong> "
+                f"against the {discount:.0%} alternative.</li>")
+    row = sweep[sweep["years"] == headline_years].iloc[0]
     verdict = "beats" if row.npv_eur >= 0 else "loses to"
     return (
         f"A <strong>{battery}</strong> at {capacity_kwh:.2f} kWh, with the "
@@ -156,6 +210,15 @@ def _verdict(sweep: pd.DataFrame, headline_years: int, discount: float,
         + (f" It first pulls ahead at <strong>{be} years</strong>."
            if be is not None else
            " It never pulls ahead within the range examined.")
+        + f"</p><ul>{''.join(lines)}</ul><p>"
+        + ("The manufacturer states both figures, and they disagree about "
+           "the verdict — which is the honest headline: this purchase is "
+           "decided by how long the hardware lasts, not by anything about "
+           f"the battery's performance. Rated cycle life is not the binding "
+           f"limit: at the measured cycling rate it would take about "
+           f"{cycle_years:.0f} years to use up the rated cycles, far beyond "
+           "either calendar figure. "
+           if warranty_years and design_life_years else "")
         + " Compare that implied return against what the money would actually "
         "earn: it is stated this way so the "
         f"{discount:.0%} assumption stays visible rather than being buried "
@@ -166,7 +229,9 @@ def build_html(assumptions: pd.DataFrame, cf: pd.DataFrame,
                sweep: pd.DataFrame, sens: pd.DataFrame, headline_years: int,
                discount: float, battery: str, capacity_kwh: float,
                cost_eur: float, saving_year_one: float,
-               purchase: pd.DataFrame, vat_rate: float = 0.21) -> str:
+               purchase: pd.DataFrame, fixed_cost_terms: pd.DataFrame,
+               warranty_years: int, design_life_years: int,
+               cycle_years: float, vat_rate: float = 0.21) -> str:
     """Assemble the page. No document wrapper — the host supplies it.
 
     `purchase` is required, not optional. An earlier draft let it default to
@@ -191,11 +256,11 @@ def build_html(assumptions: pd.DataFrame, cf: pd.DataFrame,
     cards = [
         ("What goes in",
          _inputs_card(purchase, assumptions, vat_rate, saving_year_one,
-                      capacity_kwh, headline_years),
+                      capacity_kwh, headline_years, fixed_cost_terms),
          ""),
         ("The verdict",
          _verdict(sweep, headline_years, discount, battery, capacity_kwh,
-                  cost_eur),
+                  cost_eur, warranty_years, design_life_years, cycle_years),
          chart_horizon(sweep, discount) + _horizon_table(sweep, discount)),
         ("Year by year",
          "The saving rises with energy prices and falls as the battery "
@@ -219,7 +284,7 @@ def build_html(assumptions: pd.DataFrame, cf: pd.DataFrame,
          "no subsidy. The saving itself comes from the meter-based analysis "
          "and inherits its assumptions, including that the tariff's shape "
          "holds: the entire case rests on exported energy earning about a "
-         "cent while imported energy costs 17 to 30 times that.",
+         "cent while imported energy costs " + _spread_phrase() + " that.",
          ""),
     ]
     card_html = "".join(

@@ -12,10 +12,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from pvnight import finance, investment_report
+from pvnight import economics, finance, investment_report
 
-HEADLINE_YEARS = 15
-HORIZONS = range(8, 26)
+# Both lifetimes come from the datasheet, and they disagree about the
+# verdict. The page leads with the warranty because it is the contractual
+# floor, and publishes the design life beside it. An earlier draft led with
+# 15 as a bare constant with no source -- the single choice that turned a
+# loss into a win.
+HEADLINE_YEARS = finance.WARRANTY_YEARS
+HORIZONS = range(6, 26)
 
 
 def saving_curve(repo_root: Path) -> pd.DataFrame:
@@ -51,6 +56,12 @@ def run(repo_root: Path, out_dir: Path) -> dict:
                                   finance.COST_EUR, HORIZONS)
     sens = finance.sensitivity(curve, finance.CAPACITY_KWH, finance.COST_EUR,
                                HEADLINE_YEARS)
+    # Which limit actually binds: calendar life or rated cycles?
+    sweep_csv = pd.read_csv(repo_root / "out" / "meter_battery_sweep.csv")
+    row = sweep_csv[(sweep_csv.bound == "charge_first")
+                    & (sweep_csv.power_kw == 3.0)
+                    & (sweep_csv.capacity_kwh == 10.0)]
+    cycle_years = finance.cycle_limited_years(float(row.cycles_per_yr.iloc[0]))
 
     cf.to_csv(out_dir / "investment_cashflow.csv", index=False)
     sweep.to_csv(out_dir / "investment_horizons.csv", index=False)
@@ -60,7 +71,11 @@ def run(repo_root: Path, out_dir: Path) -> dict:
             finance.ASSUMPTIONS, cf, sweep, sens, HEADLINE_YEARS,
             finance.DISCOUNT, finance.BATTERY, finance.CAPACITY_KWH,
             finance.COST_EUR, measured_saving,
-            purchase=finance.purchase_table(), vat_rate=finance.VAT_RATE))
+            purchase=finance.purchase_table(),
+            fixed_cost_terms=economics.FIXED_COST_TERMS,
+            warranty_years=finance.WARRANTY_YEARS,
+            design_life_years=finance.DESIGN_LIFE_YEARS,
+            cycle_years=cycle_years, vat_rate=finance.VAT_RATE))
 
     row = sweep[sweep["years"] == HEADLINE_YEARS].iloc[0]
     return {
@@ -72,6 +87,10 @@ def run(repo_root: Path, out_dir: Path) -> dict:
         "implied_return": float(row["implied_return"]),
         "break_even_year": finance.break_even_year(sweep),
         "headline_years": HEADLINE_YEARS,
+        "design_life_years": finance.DESIGN_LIFE_YEARS,
+        "npv_at_design_life_eur": float(
+            sweep[sweep["years"] == finance.DESIGN_LIFE_YEARS]["npv_eur"].iloc[0]),
+        "cycle_limited_years": round(cycle_years),
     }
 
 

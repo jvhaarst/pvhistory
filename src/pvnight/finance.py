@@ -22,6 +22,9 @@ from . import economics
 # Every rate the model uses, declared once with its provenance. Nothing may
 # reach the report except through here -- these three numbers decide the
 # answer, so a reader must be able to see and challenge all of them at once.
+DATASHEET = ("BSL B-LFP48-200PW datasheet, bsl-battery.com/uploads/f91d46eb.pdf, "
+             "read 2026-09-06")
+
 ASSUMPTIONS = pd.DataFrame([
     {"name": "degradation", "value": 0.015,
      "label": "battery capacity lost per year",
@@ -32,6 +35,19 @@ ASSUMPTIONS = pd.DataFrame([
     {"name": "discount", "value": 0.10,
      "label": "return available on the money elsewhere",
      "source": "owner's assumption, 2026-09-06"},
+    # The horizon decides the verdict, so it belongs here with a citation
+    # rather than sitting in the entry point as a bare constant. An earlier
+    # draft used 15 years with no source, which is precisely the choice that
+    # turns a EUR 40 loss into a EUR 724 win.
+    {"name": "warranty_years", "value": 10.0,
+     "label": "manufacturer warranty",
+     "source": DATASHEET},
+    {"name": "design_life_years", "value": 15.0,
+     "label": "manufacturer design life, at 25 C",
+     "source": DATASHEET},
+    {"name": "cycle_life", "value": 6000.0,
+     "label": "rated cycles",
+     "source": DATASHEET},
 ])
 
 
@@ -42,6 +58,15 @@ def _rate(name: str) -> float:
 DEGRADATION = _rate("degradation")
 INFLATION = _rate("inflation")
 DISCOUNT = _rate("discount")
+WARRANTY_YEARS = int(_rate("warranty_years"))
+DESIGN_LIFE_YEARS = int(_rate("design_life_years"))
+CYCLE_LIFE = _rate("cycle_life")
+
+# The measured saving is priced against the 2027 tariff and the battery is
+# installed in 2027, so year one is already at the measured price level and
+# must not be inflated again. Inflation therefore runs from n-1, not n. An
+# earlier draft used n and overstated the case by EUR 76 at ten years.
+INSTALL_YEAR_OFFSET = 1
 
 # The purchase, derived from phase 4's quote table and parts list rather than
 # retyped, so the two pages cannot drift apart on what the hardware costs.
@@ -89,12 +114,17 @@ def cashflows(saving_curve: pd.DataFrame, capacity_kwh: float,
     Everything is nominal: a nominal alternative return discounts nominal
     cash flows that inflate. Deflating the savings as well would count
     inflation twice.
+
+    Inflation runs from `n - INSTALL_YEAR_OFFSET`. The saving was measured
+    against the 2027 tariff and the battery is installed in 2027, so year one
+    already sits at the measured price level; inflating it again would price
+    2027 at 2028 rates.
     """
     n = np.arange(1, int(years) + 1)
     caps = capacity_kwh * (1.0 - degradation) ** n
     real = np.interp(caps, saving_curve["capacity_kwh"],
                      saving_curve["saving_eur"])
-    nominal = real * (1.0 + inflation) ** n
+    nominal = real * (1.0 + inflation) ** (n - INSTALL_YEAR_OFFSET)
     factor = 1.0 / (1.0 + discount) ** n
     return pd.DataFrame({
         "year": n,
@@ -173,9 +203,19 @@ def horizon_sweep(saving_curve: pd.DataFrame, capacity_kwh: float,
 
 
 def break_even_year(sweep: pd.DataFrame) -> int | None:
-    """First horizon at which the purchase beats the alternative, or None."""
-    ahead = sweep[sweep["npv_eur"] >= 0]
-    return int(ahead["years"].iloc[0]) if len(ahead) else None
+    """First horizon at which the purchase beats the alternative, or None.
+
+    Sorts before reading. Taking `.iloc[0]` of an unsorted frame gave 19 on a
+    shuffled sweep and 25 on a descending one, and the page's most quotable
+    sentence rests on this. Returns None when the first row is already ahead,
+    because "first" is then unknowable from the range examined rather than
+    equal to its lowest row.
+    """
+    s = sweep.sort_values("years")
+    ahead = s[s["npv_eur"] >= 0]
+    if not len(ahead) or int(ahead["years"].iloc[0]) == int(s["years"].iloc[0]):
+        return None
+    return int(ahead["years"].iloc[0])
 
 
 def sensitivity(saving_curve: pd.DataFrame, capacity_kwh: float,
@@ -203,3 +243,14 @@ def sensitivity(saving_curve: pd.DataFrame, capacity_kwh: float,
             rows.append({"rate": rate, "value": v, "npv_eur": npv(cf),
                          "is_base": bool(np.isclose(v, base[rate]))})
     return pd.DataFrame(rows)
+
+
+def cycle_limited_years(cycles_per_yr: float,
+                        cycle_life: float = CYCLE_LIFE) -> float:
+    """Years before the rated cycle count is used up, at a measured rate.
+
+    Published so a reader can see which limit binds. On this installation it
+    is not the cycles: about 155 a year against 6,000 rated is roughly 39
+    years, far beyond the calendar warranty and design life.
+    """
+    return float("inf") if cycles_per_yr <= 0 else float(cycle_life / cycles_per_yr)

@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pvnight import finance
+from pvnight import economics, finance
 
 
 @pytest.fixture
@@ -44,11 +44,14 @@ def test_zero_discount_and_zero_inflation_is_a_plain_sum(flat_curve):
 
 
 def test_inflation_and_discount_compose_as_a_real_rate(flat_curve):
-    """Nominal cash flows inflating at 3% discounted at 10% behave exactly
-    like flat cash flows discounted at 1.10/1.03 - 1.
+    """Nominal cash flows inflating at 3% discounted at 10% behave like flat
+    cash flows discounted at 1.10/1.03 - 1, divided by one year of inflation.
 
     Deflating the savings AND discounting at 10% would double-count
-    inflation; this pins that they compose rather than stack.
+    inflation; this pins that they compose rather than stack. The 1/(1+i)
+    factor is `INSTALL_YEAR_OFFSET`: year one is already at the measured
+    price level because the saving was priced against the 2027 tariff and the
+    battery is installed in 2027, so it is not inflated again.
     """
     a = finance.npv(finance.cashflows(
         flat_curve, 10.0, 0.0, 12, degradation=0.0, inflation=0.03,
@@ -56,7 +59,65 @@ def test_inflation_and_discount_compose_as_a_real_rate(flat_curve):
     b = finance.npv(finance.cashflows(
         flat_curve, 10.0, 0.0, 12, degradation=0.0, inflation=0.0,
         discount=1.10 / 1.03 - 1.0))
-    assert a == pytest.approx(b)
+    assert a == pytest.approx(b / 1.03 ** finance.INSTALL_YEAR_OFFSET)
+
+
+def test_year_one_is_not_inflated(flat_curve):
+    """The correction that cost EUR 76 at ten years.
+
+    The saving is measured against the 2027 tariff and the battery is
+    installed in 2027, so applying (1+i) to year one prices 2027 at 2028.
+    """
+    cf = finance.cashflows(flat_curve, 10.0, 0.0, 3, degradation=0.0,
+                           inflation=0.03, discount=0.0)
+    assert cf["nominal_eur"].iloc[0] == pytest.approx(100.0)
+    assert cf["nominal_eur"].iloc[1] == pytest.approx(103.0)
+    assert cf["nominal_eur"].iloc[2] == pytest.approx(106.09)
+
+
+def test_the_horizon_is_a_sourced_assumption_not_a_bare_constant():
+    """The number that decides the verdict must carry its citation.
+
+    An earlier draft used 15 years with no source, in an entry point, while
+    the sibling sizing page used 10 with a stated rationale -- and that
+    switch alone turned a EUR 40 loss into a EUR 724 win.
+    """
+    a = finance.ASSUMPTIONS.set_index("name")
+    for k in ("warranty_years", "design_life_years", "cycle_life"):
+        assert k in a.index, f"{k} must be a declared assumption"
+        assert "datasheet" in a.loc[k, "source"].lower()
+    assert finance.WARRANTY_YEARS == 10
+    assert finance.DESIGN_LIFE_YEARS == 15
+
+
+def test_cycle_life_is_not_the_binding_limit_here():
+    """Published so a reader can see which limit actually bites."""
+    assert finance.cycle_limited_years(155.1) > finance.DESIGN_LIFE_YEARS
+    assert np.isinf(finance.cycle_limited_years(0.0))
+
+
+def test_break_even_year_does_not_depend_on_row_order(flat_curve):
+    """The page's most quotable sentence rests on this.
+
+    Reading `.iloc[0]` of an unsorted frame gave 19 on a shuffled sweep and
+    25 on a descending one.
+    """
+    sweep = finance.horizon_sweep(flat_curve, 10.0, 600.0, range(2, 16),
+                                  degradation=0.0, inflation=0.0,
+                                  discount=0.10)
+    want = finance.break_even_year(sweep)
+    assert want is not None
+    assert finance.break_even_year(sweep.sample(frac=1.0, random_state=0)) == want
+    assert finance.break_even_year(sweep.sort_values("years", ascending=False)) == want
+
+
+def test_break_even_is_none_when_the_sweep_starts_already_ahead(flat_curve):
+    """"First" is unknowable if the range never contains the crossing."""
+    sweep = finance.horizon_sweep(flat_curve, 10.0, 100.0, range(14, 20),
+                                  degradation=0.0, inflation=0.0,
+                                  discount=0.10)
+    assert sweep["npv_eur"].iloc[0] > 0
+    assert finance.break_even_year(sweep) is None
 
 
 def test_degradation_shrinks_the_capacity_and_is_looked_up_not_scaled():
@@ -161,7 +222,9 @@ def test_the_page_states_the_verdict_and_its_own_fragility(flat_curve):
     sens = finance.sensitivity(flat_curve, 10.0, 600.0, 15)
     html = investment_report.build_html(
         finance.ASSUMPTIONS, cf, sweep, sens, 15, 0.10, "Test cell", 10.0,
-        600.0, 100.0, purchase=finance.purchase_table())
+        600.0, 100.0, purchase=finance.purchase_table(),
+        fixed_cost_terms=economics.FIXED_COST_TERMS, warranty_years=10,
+        design_life_years=15, cycle_years=39.0)
 
     text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))
     be = finance.break_even_year(sweep)
@@ -197,6 +260,8 @@ def test_the_verdict_flips_when_the_investment_loses(flat_curve):
     sens = finance.sensitivity(flat_curve, 10.0, 5000.0, 15)
     text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", investment_report.build_html(
         finance.ASSUMPTIONS, cf, sweep, sens, 15, 0.10, "Test cell", 10.0,
-        5000.0, 100.0, purchase=finance.purchase_table())))
+        5000.0, 100.0, purchase=finance.purchase_table(),
+        fixed_cost_terms=economics.FIXED_COST_TERMS, warranty_years=10,
+        design_life_years=15, cycle_years=39.0)))
     assert "loses to" in text
     assert "never pulls ahead" in text
