@@ -1,7 +1,7 @@
 """Site constants and model parameters. No logic lives here."""
 
-LATITUDE = 51.98
-LONGITUDE = 5.80
+LATITUDE = 52.0
+LONGITUDE = 5.8
 SITE_TZ = "Europe/Amsterdam"
 
 # Input data lives in its own folder, named by provenance so a second
