@@ -14,9 +14,17 @@ def test_run_writes_all_three_outputs(tmp_path, repo_root):
     assert len(nights) > 2000
     assert set(sweep["bound"].unique()) == {"charge_first", "discharge_first"}
     assert set(sweep["power_kw"].unique()) == {2.5, 3.0, 3.7}
-    # Six analysis charts plus the two winter-wall charts.
-    assert (tmp_path / "meter_report.html").read_text().count("<svg") == 8
+    # Six analysis charts, two winter-wall charts, two euro charts.
+    assert (tmp_path / "meter_report.html").read_text().count("<svg") == 10
     assert (tmp_path / "meter_monthly_wall.csv").exists()
+    assert (tmp_path / "meter_economics.csv").exists()
+    assert (tmp_path / "meter_tariff_bands.csv").exists()
+    assert (tmp_path / "meter_quotes.csv").exists()
+
+    assert s["no_battery_cost_eur"] > 0.0
+    assert s["annual_saving_eur"] > 0.0
+    assert s["derived_threshold_kwh_per_kwh"] > 0.0
+    assert s["arbitrage_ceiling_eur_yr"] >= 0.0
 
     assert 0.0 < s["coverable_pct"] < 100.0
     assert all(1 <= m <= 12 for m in s["negative_surplus_months"])

@@ -155,6 +155,203 @@ def _wall_prose(monthly: pd.DataFrame, coverable_pct: float,
     )
 
 
+
+def tariff_card(bands: pd.DataFrame) -> str:
+    """The tariff table and what it implies, both read from the frame.
+
+    The multiplier is the economic case for this whole phase, so it is
+    computed here rather than quoted: change the prices and the sentence
+    changes with them.
+    """
+    net = bands["vergoeding_eur_kwh"] - bands["terugleverkosten_eur_kwh"]
+    ratio = bands["levering_eur_kwh"] / net
+    head = "".join(f"<th>{h}</th>" for h in
+                   ["band", "import €/kWh", "export cost", "export paid",
+                    "net export", "×"])
+    rows = "".join(
+        f"<tr><td>{b}</td><td>{lv:.5f}</td><td>{tk:.5f}</td>"
+        f"<td>{vg:.5f}</td><td>{n:.5f}</td><td>{r:.1f}×</td></tr>"
+        for b, lv, tk, vg, n, r in zip(
+            bands["band"], bands["levering_eur_kwh"],
+            bands["terugleverkosten_eur_kwh"], bands["vergoeding_eur_kwh"],
+            net, ratio))
+    return (
+        f'<p class="sub">Exporting a kWh nets <strong>€{net.mean():.3f}</strong>'
+        " — the feed-in charge claws back all but a fraction of the feed-in "
+        "payment, so there is no net metering left in this contract. The same "
+        f"kWh stored and used later is worth <strong>{ratio.min():.1f}× to "
+        f"{ratio.max():.1f}×</strong> that. This is the entire economic case "
+        "for a battery here.</p>"
+        f'<div class="chart"><table><thead><tr>{head}</tr></thead>'
+        f"<tbody>{rows}</tbody></table></div>")
+
+
+def chart_savings(annual: pd.DataFrame) -> str:
+    """Euros saved per year against capacity."""
+    fig, ax = plt.subplots(figsize=(9, 4))
+    a = annual.sort_values("capacity_kwh")
+    ax.plot(a["capacity_kwh"], a["saving_eur"], lw=2, color=SERIES[0])
+    ax.set_xlabel("battery capacity (kWh, nameplate)")
+    ax.set_ylabel("€ saved per year")
+    return _svg(fig)
+
+
+def chart_break_even(annual: pd.DataFrame, quotes: pd.DataFrame,
+                     years: float) -> str:
+    """Installed €/kWh each capacity must beat, with the real quotes on it."""
+    fig, ax = plt.subplots(figsize=(9, 4))
+    a = annual[annual["capacity_kwh"] > 0].sort_values("capacity_kwh")
+    ax.plot(a["capacity_kwh"], a["break_even_eur_per_kwh"], lw=2,
+            color=SERIES[1], label=f"break-even over {years:.0f} years")
+    ax.scatter(quotes["kwh"], quotes["eur_per_kwh"], s=36, color=SERIES[0],
+               zorder=3, label="quoted products")
+    for q in quotes.itertuples():
+        ax.annotate(f"{q.kwh:.2f} kWh", xy=(q.kwh, q.eur_per_kwh),
+                    xytext=(4, 6), textcoords="offset points",
+                    fontsize=7, color=FURNITURE)
+    ax.set_xlabel("battery capacity (kWh, nameplate)")
+    ax.set_ylabel("€ per kWh installed")
+    ax.legend(frameon=False, labelcolor=FURNITURE, fontsize=8)
+    return _svg(fig)
+
+
+def _quote_table_html(quotes: pd.DataFrame, horizon_years: float,
+                      vat_rate: float) -> str:
+    """Each quote, with what is actually paid and what it implies.
+
+    The optimum column is looked up by horizon rather than hardcoded: an
+    earlier version pinned `optimum_kwh_10yr` while its own section prose was
+    parameterised, so changing the horizon crashed the build. A parameter
+    that cannot be changed is not a parameter.
+    """
+    col = f"optimum_kwh_{horizon_years:.0f}yr"
+    if col not in quotes.columns:
+        raise ValueError(f"quote table has no {col}; horizons available: "
+                         f"{[c for c in quotes.columns if c.startswith('optimum')]}")
+    head = "".join(f"<th>{h}</th>" for h in
+                   ["product", "kWh", "battery €", "€/kWh", "€/yr saved",
+                    f"total incl. {vat_rate:.0%} VAT", "payback incl.",
+                    "payback ex-VAT", "implies optimum"])
+    rows = "".join(
+        f"<tr><td>{q.product}</td><td>{q.kwh:.2f}</td><td>{q.eur:,.2f}</td>"
+        f"<td>{q.eur_per_kwh:.2f}</td><td>{q.saving_eur_yr:.0f}</td>"
+        f"<td>{q.total_incl_vat:,.0f}</td>"
+        f"<td><strong>{q.payback_yr_incl_vat:.1f} yr</strong></td>"
+        f"<td>{q.payback_yr:.1f} yr</td>"
+        f"<td>{getattr(q, col):.1f} kWh</td></tr>"
+        for q in quotes.itertuples())
+    return (f'<div class="chart"><table><thead><tr>{head}</tr></thead>'
+            f"<tbody>{rows}</tbody></table></div>")
+
+
+
+def _confidence_card(annual: pd.DataFrame, priced: pd.DataFrame,
+                     optimum_kwh: float, eur_per_kwh: float,
+                     fixed_cost_eur: float, horizon_years: float,
+                     terms: pd.DataFrame, usable_fraction: float,
+                     round_trip: float) -> str:
+    """How much to trust the recommended capacity.
+
+    These caveats lived only in the README, which is the wrong way round: the
+    page states the recommendation, so the page must state its sharpness. A
+    reader deciding what to buy is holding this, not the repository.
+
+    Every figure is recomputed here from the frames the page already carries.
+    """
+    a = annual.sort_values("capacity_kwh")
+    net = (a["saving_eur"].to_numpy() * horizon_years
+           - fixed_cost_eur - a["capacity_kwh"].to_numpy() * eur_per_kwh)
+    best = float(net.max())
+    # The band of capacities within 2% of the best net position: the range the
+    # curve genuinely cannot distinguish between.
+    near = a["capacity_kwh"].to_numpy()[net >= best - 0.02 * abs(best)]
+    lo, hi = float(near.min()), float(near.max())
+    spread = best - float(net[(a["capacity_kwh"] >= lo)
+                              & (a["capacity_kwh"] <= hi)].min())
+
+    years = sorted(int(y) for y in priced.loc[priced["is_full_year"], "year"].unique())
+    all_years = sorted(int(y) for y in priced["year"].unique())
+    dropped = [y for y in all_years if y not in years]
+
+    rows = "".join(
+        f"<tr><td>{c:.1f} kWh</td><td>€{n:,.0f}</td></tr>"
+        for c, n in zip(a["capacity_kwh"], net)
+        if lo <= c <= hi)
+
+    assumed = terms[terms["basis"].str.startswith("ASSUMED")]
+    assumed_html = "".join(
+        f"<li>€{t.eur:,.2f} — {t.item} ({t.basis.replace('ASSUMED', 'assumed')})</li>"
+        for t in assumed.itertuples())
+
+    return (
+        f'<p class="sub">The recommendation is '
+        f"<strong>{optimum_kwh:.1f} kWh</strong>, but the curve is nearly "
+        f"flat around it: every capacity from <strong>{lo:.1f}</strong> to "
+        f"<strong>{hi:.1f} kWh</strong> sits within <strong>€{spread:,.0f}"
+        f"</strong> of the best {horizon_years:.0f}-year net position of "
+        f"€{best:,.0f}. One decimal place claims more than the data resolves; "
+        "read it as a band, and let product availability pick within it.</p>"
+        f'<div class="chart"><table><thead><tr><th>capacity</th>'
+        f"<th>{horizon_years:.0f}-year net position</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table></div>"
+        f'<p class="sub">Priced across <strong>{len(years)}</strong> complete '
+        f"calendar years ({', '.join(str(y) for y in years)}). "
+        + (f"<strong>{', '.join(str(y) for y in dropped)}</strong> "
+           + ("are" if len(dropped) > 1 else "is")
+           + " excluded: partial at the ends of the record, or missing enough "
+             "intervals inside the year to understate its bill. Dropping a "
+             "year with a midwinter outage moves this answer by half a step, "
+             "so the exclusion is not cosmetic. " if dropped else "")
+        + f"The battery is modelled at <strong>{usable_fraction:.2f}</strong> "
+        f"usable fraction and <strong>{round_trip:.2f}</strong> round trip, "
+        "both inherited from the earlier phase. Only one quoted product "
+        "states a usable figure (15.27 of 16.07 kWh, i.e. 0.95); at that "
+        "value the recommendation is unchanged, and at a fifteen-year "
+        "horizon it rises by one to two steps.</p>"
+        + (f'<p class="sub">Three terms of the €{fixed_cost_eur:,.0f} of '
+           "non-scaling hardware are assumptions rather than quotes:</p>"
+           f"<ul>{assumed_html}</ul>"
+           '<p class="sub">They do not move the recommendation — fixed cost '
+           "is identical at every capacity and cancels in the comparison — "
+           "but they shift payback by roughly a fifth of a year.</p>"
+           if len(assumed) else ""))
+
+
+def _euro_prose(s: dict, years: float) -> str:
+    """The euro finding, every number read from the summary dict."""
+    return (
+        "Under this tariff the variable electricity bill without a battery "
+        f"comes to <strong>€{s['no_battery_cost_eur']:,.0f}</strong> in the "
+        "most recent full year. Against the quoted hardware the optimal "
+        f"capacity is <strong>{s['euro_optimum_kwh']:.1f} kWh</strong>, "
+        f"saving <strong>€{s['annual_saving_eur']:,.0f}</strong> a year for a "
+        f"break-even installed cost of "
+        f"<strong>€{s['breakeven_eur_per_kwh']:,.0f}/kWh</strong> over "
+        f"{years:.0f} years. Phase 2 published a 50 kWh/yr rule of thumb that "
+        "was never derived from anything and was removed at the owner's "
+        "instruction; the same rule derived from these prices is "
+        f"<strong>{s['derived_threshold_kwh_per_kwh']:.0f} kWh/yr</strong>, so "
+        "the guess was close but had no standing. Standing charges, network "
+        "tariffs and taxes are excluded throughout: they do not change with "
+        "battery size, so they cancel in every comparison. Degradation and "
+        "discounting are not modelled, and payback is stated in undiscounted "
+        "years.")
+
+
+def _arbitrage_prose(a: dict) -> str:
+    return (
+        "A perfect-foresight upper bound on buying cheap and discharging "
+        f"dear adds at most <strong>€{a['ceiling_eur_yr']:,.0f}</strong> a "
+        "year on top. That is a ceiling, not a policy, and it is loose in "
+        "three ways that all push it up: it assumes a full extra cycle every "
+        "day, ignores that the battery is already storing solar, and uses "
+        "hindsight no dispatch has. It is also non-zero on only "
+        f"<strong>{a['usable_days']:,}</strong> days — the summer ones, when "
+        "the battery is already full of sun. Winter's peak-to-off-peak "
+        "spread is negative once the round trip is paid. Worth investigating "
+        "as its own phase; not worth counting on.")
+
+
 def chart_visible_fraction(monthly_ratio: pd.DataFrame) -> str:
     """The monthly PVOutput/meter ratio across the whole record.
 
@@ -510,6 +707,19 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
                 gaps: pd.DataFrame, resolution_penalty_pct: float,
                 excluded_nights: int,
                 elbow_overlapping_span: float = float("nan"),
+                tariff_bands: pd.DataFrame | None = None,
+                annual_savings: pd.DataFrame | None = None,
+                quotes: pd.DataFrame | None = None,
+                economics_summary: dict | None = None,
+                arbitrage: dict | None = None,
+                horizon_years: float = 10.0,
+                vat_rate: float = 0.21,
+                priced: pd.DataFrame | None = None,
+                fixed_cost_terms: pd.DataFrame | None = None,
+                fixed_cost_eur: float = 0.0,
+                best_eur_per_kwh: float = 0.0,
+                usable_fraction: float = 0.90,
+                round_trip: float = 0.90,
                 monthly_wall: pd.DataFrame | None = None,
                 monthly_discharge: pd.DataFrame | None = None,
                 coverable_pct: float = float("nan")) -> str:
@@ -704,6 +914,31 @@ def build_html(meter_nights: pd.DataFrame, pv_nights: pd.DataFrame,
          "night load and, with it, the capacity worth buying. "
          + span_caveat,
          chart_comparison(meter_sweep, pv_sweep)),
+        *([] if tariff_bands is None else [
+            ("What a kWh is actually worth", tariff_card(tariff_bands), "")]),
+        *([] if annual_savings is None or economics_summary is None else [
+            ("What the battery saves, in euros",
+             _euro_prose(economics_summary, horizon_years),
+             chart_savings(annual_savings))]),
+        *([] if annual_savings is None or quotes is None else [
+            ("What it would have to cost, against real quotes",
+             "The installed price per kWh at which each capacity exactly "
+             f"repays itself in {horizon_years:.0f} years, with the quoted "
+             "products marked. A product below the curve pays back inside "
+             "the horizon; one above it does not."
+             + _quote_table_html(quotes, horizon_years, vat_rate),
+             chart_break_even(annual_savings, quotes, horizon_years))]),
+        *([] if (annual_savings is None or priced is None
+                 or fixed_cost_terms is None or economics_summary is None) else [
+            ("How much to trust that number",
+             _confidence_card(annual_savings, priced,
+                              economics_summary["euro_optimum_kwh"],
+                              best_eur_per_kwh, fixed_cost_eur, horizon_years,
+                              fixed_cost_terms, usable_fraction, round_trip),
+             "")]),
+        *([] if arbitrage is None else [
+            ("The ceiling on trading the tariff", _arbitrage_prose(arbitrage),
+             "")]),
         ("Nights excluded from the analysis",
          _gap_prose(gaps, excluded_nights),
          chart_coverage(gaps, meter_nights)),
