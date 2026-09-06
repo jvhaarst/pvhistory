@@ -20,6 +20,20 @@ from .finance import break_even_year  # noqa: E402
 from .night_report import TABLE_CSS  # noqa: E402
 from .report import FURNITURE, SERIES, STYLE, _svg  # noqa: E402
 
+def _residual_phrase(cf: pd.DataFrame, nameplate_kwh: float) -> str:
+    """What the pack still holds at the horizon, read from the cash flows.
+
+    Previously typed as "at 1.5% a year it still holds about four fifths of
+    its capacity after fifteen years" — three numbers stated rather than
+    derived, in a sentence about being conservative. Measured against
+    nameplate, not against year one, which is already a year degraded.
+    """
+    kept = float(cf["capacity_kwh"].iloc[-1]) / nameplate_kwh
+    return (f"after {len(cf)} years the pack still holds about "
+            f"{kept:.0%} of its nameplate capacity, and that is credited at "
+            "nothing.")
+
+
 def _spread_phrase() -> str:
     """The import-to-export ratio, read from the tariff rather than typed.
 
@@ -38,7 +52,8 @@ def _spread_phrase() -> str:
 
 RATE_LABEL = {"degradation": "battery degradation",
               "inflation": "energy price rise",
-              "discount": "alternative return"}
+              "discount": "alternative return",
+              "life_years": "assumed life (years, right axis)"}
 
 
 def chart_horizon(sweep: pd.DataFrame, discount: float) -> str:
@@ -62,9 +77,19 @@ def chart_horizon(sweep: pd.DataFrame, discount: float) -> str:
     return _svg(fig)
 
 
-def chart_cashflow(cf: pd.DataFrame) -> str:
-    """What each year contributes once discounted."""
+def chart_cashflow(cf: pd.DataFrame, cost_eur: float = 0.0) -> str:
+    """What each year contributes once discounted, against what was paid.
+
+    The cost line matters: without it the chart is fifteen bars of pure
+    income and the reader has to remember, unaided, that a few thousand euro
+    went out at the start.
+    """
     fig, ax = plt.subplots(figsize=(9, 3.5))
+    if cost_eur:
+        ax.axhline(cost_eur, color=FURNITURE, ls=":", lw=1)
+        ax.annotate(f"paid up front: €{cost_eur:,.0f}", xy=(1, cost_eur),
+                    xytext=(4, -12), textcoords="offset points",
+                    fontsize=8, color=FURNITURE)
     ax.bar(cf["year"], cf["nominal_eur"], 0.75, color=SERIES[2],
            label="nominal saving")
     ax.bar(cf["year"], cf["present_value_eur"], 0.45, color=SERIES[0],
@@ -78,8 +103,18 @@ def chart_cashflow(cf: pd.DataFrame) -> str:
 def chart_sensitivity(sens: pd.DataFrame) -> str:
     """Each assumption moved alone, so their weights can be compared."""
     fig, ax = plt.subplots(figsize=(9, 4))
+    twin = None
     for i, (rate, g) in enumerate(sens.groupby("rate")):
         g = g.sort_values("value")
+        if rate == "life_years":
+            twin = ax.twiny()
+            twin.plot(g["value"], g["npv_eur"], lw=2, marker="s", ms=4,
+                      ls="--", color=FURNITURE, label=RATE_LABEL[rate])
+            b = g[g["is_base"]]
+            twin.scatter(b["value"], b["npv_eur"], s=70, facecolors="none",
+                         edgecolors=FURNITURE, zorder=3)
+            twin.set_xlabel("assumed life (years)")
+            continue
         ax.plot(100 * g["value"], g["npv_eur"], lw=2, marker="o", ms=4,
                 color=SERIES[i % len(SERIES)], label=RATE_LABEL.get(rate, rate))
         base = g[g["is_base"]]
@@ -164,11 +199,18 @@ def _inputs_card(purchase: pd.DataFrame, assumptions: pd.DataFrame,
 
 def _horizon_table(sweep: pd.DataFrame, discount: float) -> str:
     head = "".join(f"<th>{h}</th>" for h in
-                   ["assumed life", f"NPV at {discount:.0%}", "implied return"])
+                   ["assumed life", f"NPV at {discount:.0%}", "implied",
+                    "achieved"])
+    be = break_even_year(sweep)
+    # Every other year, but never hide the crossing: an earlier version
+    # filtered to even years while the prose named an odd break-even year,
+    # so the table jumped straight over the row the reader was looking for.
     rows = "".join(
-        f"<tr><td>{r.years} yr</td><td>€{r.npv_eur:,.0f}</td>"
-        f"<td>{r.implied_return:.1%}</td></tr>"
-        for r in sweep.itertuples() if r.years % 2 == 0)
+        f"<tr><td>{r.years} yr{' ←' if r.years == be else ''}</td>"
+        f"<td>€{r.npv_eur:,.0f}</td><td>{r.implied_return:.1%}</td>"
+        f"<td>{r.achieved_return:.1%}</td></tr>"
+        for r in sweep.sort_values("years").itertuples()
+        if r.years % 2 == 0 or r.years == be)
     return (f'<div class="chart"><table><thead><tr>{head}</tr></thead>'
             f"<tbody>{rows}</tbody></table></div>")
 
@@ -195,8 +237,10 @@ def _verdict(sweep: pd.DataFrame, headline_years: int, discount: float,
                 f"<li>At the <strong>{y}-year {label}</strong>: "
                 f"{'ahead by' if r.npv_eur >= 0 else 'behind by'} "
                 f"<strong>€{abs(r.npv_eur):,.0f}</strong>, "
-                f"an implied return of <strong>{r.implied_return:.1%}</strong> "
-                f"against the {discount:.0%} alternative.</li>")
+                f"an implied return of <strong>{r.implied_return:.1%}</strong>, "
+                f"or <strong>{r.achieved_return:.1%}</strong> once the yearly "
+                f"savings are reinvested at the {discount:.0%} alternative "
+                "rather than at the implied rate itself.</li>")
     row = sweep[sweep["years"] == headline_years].iloc[0]
     verdict = "beats" if row.npv_eur >= 0 else "loses to"
     return (
@@ -219,16 +263,20 @@ def _verdict(sweep: pd.DataFrame, headline_years: int, discount: float,
            f"{cycle_years:.0f} years to use up the rated cycles, far beyond "
            "either calendar figure. "
            if warranty_years and design_life_years else "")
-        + " Compare that implied return against what the money would actually "
-        "earn: it is stated this way so the "
-        f"{discount:.0%} assumption stays visible rather than being buried "
-        "inside a single number.")
+        + " Two returns are quoted because they answer different questions. "
+        "The <em>implied</em> return is the rate at which this purchase "
+        "breaks even, and it silently assumes each year's saving is "
+        "reinvested at that same rate — which nobody can do, since if it "
+        "were available it would be the alternative. The <em>achieved</em> "
+        f"return reinvests at the {discount:.0%} actually on offer, and is "
+        "the one to compare. Both give the same verdict here; they differ in "
+        "how large the margin looks.")
 
 
 def build_html(assumptions: pd.DataFrame, cf: pd.DataFrame,
                sweep: pd.DataFrame, sens: pd.DataFrame, headline_years: int,
                discount: float, battery: str, capacity_kwh: float,
-               cost_eur: float, saving_year_one: float,
+               cost_eur: float, measured_saving: float,
                purchase: pd.DataFrame, fixed_cost_terms: pd.DataFrame,
                warranty_years: int, design_life_years: int,
                cycle_years: float, vat_rate: float = 0.21) -> str:
@@ -245,7 +293,7 @@ def build_html(assumptions: pd.DataFrame, cf: pd.DataFrame,
         (f"{sweep[sweep.years == headline_years].implied_return.iloc[0]:.1%}",
          f"implied return over {headline_years} years"),
         (f"€{cost_eur:,.0f}", "total cost including VAT"),
-        (f"€{saving_year_one:,.0f}",
+        (f"€{measured_saving:,.0f}",
          f"saved per year at {capacity_kwh:.2f} kWh, today's prices"),
         (f"{be} yr" if be is not None else "never",
          f"before it beats {discount:.0%} elsewhere"),
@@ -255,7 +303,7 @@ def build_html(assumptions: pd.DataFrame, cf: pd.DataFrame,
 
     cards = [
         ("What goes in",
-         _inputs_card(purchase, assumptions, vat_rate, saving_year_one,
+         _inputs_card(purchase, assumptions, vat_rate, measured_saving,
                       capacity_kwh, headline_years, fixed_cost_terms),
          ""),
         ("The verdict",
@@ -269,19 +317,26 @@ def build_html(assumptions: pd.DataFrame, cf: pd.DataFrame,
          "the measured saving curve, never used to scale the euros: the "
          "curve is concave and this battery sits past its elbow, so the "
          "first years lose very little to it.",
-         chart_cashflow(cf)),
+         chart_cashflow(cf, cost_eur)),
         ("How much the assumptions matter",
-         "Each rate moved alone, the other two held at their assumed "
-         "values. The circled point on each line is the assumption in the "
+         "Each input moved alone, the others held at their assumed "
+         "values. The assumed life is on the dashed line and its own axis, "
+         "because it is measured in years rather than percent — and because "
+         "an earlier version of this card left it out while the page called "
+         "it the input that decides the answer. The circled point on each line is the assumption in the "
          "table above. A line that crosses zero inside its plausible range "
          "is an assumption the answer genuinely depends on.",
          chart_sensitivity(sens)),
         ("What this does not include",
          "No residual value: the battery is assumed worthless at the end of "
-         "the horizon, which is deliberately conservative — at 1.5% a year "
-         "it still holds about four fifths of its capacity after fifteen "
-         "years. No maintenance, no inverter replacement, no insurance, and "
-         "no subsidy. The saving itself comes from the meter-based analysis "
+         "the horizon, which is deliberately conservative — "
+         + _residual_phrase(cf, capacity_kwh)
+         + " Nor is anything counted that cuts the other way: the panels "
+         "themselves degrade, the household's consumption will drift, and "
+         "the inverter inside the hardware cost is unlikely to outlast the "
+         "far end of the chart above without replacement. No maintenance, no "
+         "insurance, and no subsidy. The saving itself comes from the "
+         "meter-based analysis "
          "and inherits its assumptions, including that the tariff's shape "
          "holds: the entire case rests on exported energy earning about a "
          "cent while imported energy costs " + _spread_phrase() + " that.",

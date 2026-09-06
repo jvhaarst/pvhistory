@@ -170,7 +170,7 @@ def implied_return(saving_curve: pd.DataFrame, capacity_kwh: float,
         return float("nan")
     if f(hi) > 0:
         return float("nan")
-    for _ in range(200):
+    for _ in range(60):   # [0,10] is exhausted to double precision by ~50
         mid = 0.5 * (lo + hi)
         if f(mid) > 0:
             lo = mid
@@ -201,6 +201,9 @@ def horizon_sweep(saving_curve: pd.DataFrame, capacity_kwh: float,
             "implied_return": implied_return(saving_curve, capacity_kwh,
                                              cost_eur, y, degradation,
                                              inflation),
+            "achieved_return": achieved_return(saving_curve, capacity_kwh,
+                                               cost_eur, y, degradation,
+                                               inflation, discount),
         })
     return pd.DataFrame(rows)
 
@@ -245,6 +248,14 @@ def sensitivity(saving_curve: pd.DataFrame, capacity_kwh: float,
             cf = cashflows(saving_curve, capacity_kwh, cost_eur, years, **kw)
             rows.append({"rate": rate, "value": v, "npv_eur": npv(cf),
                          "is_base": bool(np.isclose(v, base[rate]))})
+
+    # The assumed life belongs here too. The page calls it the input that
+    # decides the answer, and an earlier version of this card left it out --
+    # varying the three rates while omitting the one that flips the sign.
+    for y in (8, 10, 12, 15, 20, 25):
+        cf = cashflows(saving_curve, capacity_kwh, cost_eur, y, **base)
+        rows.append({"rate": "life_years", "value": float(y), "npv_eur": npv(cf),
+                     "is_base": y == years})
     return pd.DataFrame(rows)
 
 
@@ -257,3 +268,28 @@ def cycle_limited_years(cycles_per_yr: float,
     years, far beyond the calendar warranty and design life.
     """
     return float("inf") if cycles_per_yr <= 0 else float(cycle_life / cycles_per_yr)
+
+
+def achieved_return(saving_curve: pd.DataFrame, capacity_kwh: float,
+                    cost_eur: float, years: int,
+                    degradation: float = DEGRADATION,
+                    inflation: float = INFLATION,
+                    reinvest_at: float = DISCOUNT) -> float:
+    """What the money actually compounds at, if the savings are reinvested.
+
+    The implied return (IRR) assumes each year's saving is reinvested at the
+    IRR itself. Nobody can do that -- if it were available, it would be the
+    alternative. This reinvests at the stated alternative rate instead, which
+    is the comparison the owner actually faces, and is the standard MIRR.
+
+    It is always the more conservative of the two when the IRR beats the
+    alternative, and the two agree exactly when they are equal.
+    """
+    cf = cashflows(saving_curve, capacity_kwh, cost_eur, years,
+                   degradation, inflation, reinvest_at)
+    n = cf["year"].to_numpy()
+    future_value = float((cf["nominal_eur"].to_numpy()
+                          * (1.0 + reinvest_at) ** (years - n)).sum())
+    if cost_eur <= 0 or future_value <= 0:
+        return float("nan")
+    return float((future_value / cost_eur) ** (1.0 / years) - 1.0)

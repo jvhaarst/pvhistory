@@ -82,7 +82,8 @@ def run(repo_root: Path, out_dir: Path) -> dict:
         "battery": finance.BATTERY,
         "cost_eur": finance.COST_EUR,
         "measured_saving_eur": measured_saving,
-        "saving_year_one_eur": float(cf["nominal_eur"].iloc[0]),
+        "achieved_return": float(
+            sweep[sweep["years"] == HEADLINE_YEARS]["achieved_return"].iloc[0]),
         "npv_eur": float(row["npv_eur"]),
         "implied_return": float(row["implied_return"]),
         "break_even_year": finance.break_even_year(sweep),

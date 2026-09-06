@@ -195,14 +195,43 @@ def test_the_assumptions_table_carries_every_rate_the_model_uses():
     assert a.loc["discount", "value"] == pytest.approx(0.10)
 
 
-def test_sensitivity_varies_one_rate_at_a_time(flat_curve):
+def test_sensitivity_varies_one_input_at_a_time_including_the_life(flat_curve):
+    """The assumed life must be in the card the page calls decisive.
+
+    An earlier version varied the three rates and omitted the one input that
+    flips the sign, while the lede named it as mattering most.
+    """
     s = finance.sensitivity(flat_curve, capacity_kwh=10.0, cost_eur=600.0,
                             years=15)
-    assert set(s["rate"]) == {"degradation", "inflation", "discount"}
+    assert set(s["rate"]) == {"degradation", "inflation", "discount",
+                              "life_years"}
     base = s[s["is_base"]]
-    assert len(base) == 3, "each rate must show its own baseline row"
-    # The three baselines describe the same scenario, so they must agree.
+    assert len(base) == 4, "each input must show its own baseline row"
+    # All four baselines describe the same scenario, so they must agree.
     assert base["npv_eur"].nunique() == 1
+
+
+def test_achieved_return_reinvests_at_the_alternative_not_at_itself(flat_curve):
+    """MIRR, and the reason two returns are published.
+
+    The implied return assumes each saving is reinvested at the implied rate
+    itself. When that beats the alternative the achieved return is lower;
+    when it trails, reinvesting at the alternative helps. Both were observed
+    on the real curve, so the page must not present one as the other.
+    """
+    lo_cost = finance.achieved_return(flat_curve, 10.0, 300.0, 15)
+    irr_lo = finance.implied_return(flat_curve, 10.0, 300.0, 15)
+    assert irr_lo > 0.10 and lo_cost < irr_lo, "high IRR: achieved must be lower"
+
+    hi_cost = finance.achieved_return(flat_curve, 10.0, 1400.0, 15)
+    irr_hi = finance.implied_return(flat_curve, 10.0, 1400.0, 15)
+    assert irr_hi < 0.10 and hi_cost > irr_hi, "low IRR: reinvesting at 10% helps"
+
+    # Both must agree with the NPV sign at the same rate.
+    for cost in (300.0, 1400.0):
+        n = finance.npv(finance.cashflows(flat_curve, 10.0, cost, 15))
+        a = finance.achieved_return(flat_curve, 10.0, cost, 15)
+        assert (n >= 0) == (a >= 0.10)
 
 
 def test_the_page_states_the_verdict_and_its_own_fragility(flat_curve):
