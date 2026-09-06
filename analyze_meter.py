@@ -36,6 +36,15 @@ REPORT_POWER_KW = 3.0
 # optimum moves up half a step -- so the quote table publishes both.
 HORIZON_YEARS = 10.0
 
+# Depth of discharge, sourced rather than conventional. Phase 2 assumed 90%
+# with no citation and phases 3 and 4 inherited it; both products actually
+# under consideration state 95% -- the Dyness as 15.27 usable of 16.07 kWh
+# nameplate, the BSL as a DoD figure. This is what the spec meant by "re-run
+# when a quote states a real one". It covers only the state-of-charge window
+# the BMS allows; conversion loss is ROUND_TRIP, separately.
+USABLE_FRACTION = 0.95
+ROUND_TRIP = 0.90
+
 # PVOutput samples every five minutes; the meter every fifteen. Three of the
 # former make one of the latter, which is what makes the resolution penalty
 # measurable on real data rather than assumed.
@@ -107,6 +116,8 @@ def resolution_penalty_pct(
     pv_sweep: pd.DataFrame,
     capacities_kwh: np.ndarray = CAPACITIES,
     power_kw: float = REPORT_POWER_KW,
+    round_trip: float = ROUND_TRIP,
+    usable_fraction: float = USABLE_FRACTION,
 ) -> float:
     """How much better a 15-minute simulation looks than a 5-minute one.
 
@@ -161,7 +172,12 @@ def resolution_penalty_pct(
     span = (s["ts_utc"].iloc[-1] - s["ts_utc"].iloc[0]).total_seconds()
     years = span / (365.25 * 24 * 3600)
 
-    spec = battery.BatterySpec(np.asarray(capacities_kwh, dtype=float), power_kw)
+    # Both sides of this comparison MUST carry the same battery spec, or it
+    # measures the spec instead of the resolution. Changing `pv_sweep`'s
+    # usable fraction while this defaulted to 0.90 moved the "penalty" from
+    # -0.016% to -1.08% -- 66x, and entirely spurious.
+    spec = battery.BatterySpec(np.asarray(capacities_kwh, dtype=float),
+                               power_kw, round_trip, usable_fraction)
     coarse = battery.simulate(net_15, night_15, nonev_15, month_15, spec,
                               dt_hours=meter.DT_HOURS)
     coarse_kwh_yr = pd.Series(coarse.nonev_grid_import_wh / 1000.0 / years,
@@ -217,7 +233,8 @@ def elbow_on_overlapping_span(meter_df: pd.DataFrame, nights_df: pd.DataFrame,
                   & (nights_df["night_end_utc"] <= hi)]
     if m.empty or n.empty or not n["covered"].any():
         return float("nan")
-    sweep = meter_battery.sweep_bounds(m, n, capacities_kwh, (power_kw,))
+    sweep = meter_battery.sweep_bounds(m, n, capacities_kwh, (power_kw,),
+                                       ROUND_TRIP, USABLE_FRACTION)
     return float(battery.elbow_capacity(
         sweep[sweep["bound"] == "charge_first"], power_kw=power_kw))
 
@@ -232,7 +249,8 @@ def run(repo_root: Path, out_dir: Path) -> dict:
     meter_df = meter.load_meter(repo_root / meter.METER_SUBDIR)
     gaps = meter.find_gaps(meter_df)
     nights_df = meter_nights.summarise(meter_df, windows, gaps)
-    sweep_df = meter_battery.sweep_bounds(meter_df, nights_df, CAPACITIES, POWER_KWS)
+    sweep_df = meter_battery.sweep_bounds(meter_df, nights_df, CAPACITIES,
+                                          POWER_KWS, ROUND_TRIP, USABLE_FRACTION)
 
     # The elbow of each bound's curve, not a chosen cut-off. Neither bound is
     # the answer on its own; the pair is the range the report publishes.
@@ -246,7 +264,10 @@ def run(repo_root: Path, out_dir: Path) -> dict:
 
     samples = load(repo_root / DATA_SUBDIR)
     pv_nights = _read_pv_nights(repo_root)
-    pv_sweep = battery.sweep(samples, pv_nights, CAPACITIES, POWER_KWS)
+    # Same battery spec as the meter curve on purpose: this chart isolates
+    # the consumption channel, so any other difference would confound it.
+    pv_sweep = battery.sweep(samples, pv_nights, CAPACITIES, POWER_KWS,
+                             ROUND_TRIP, USABLE_FRACTION)
 
     elbow_overlap = elbow_on_overlapping_span(meter_df, nights_df, samples)
 
@@ -257,12 +278,15 @@ def run(repo_root: Path, out_dir: Path) -> dict:
     wall = meter_wall.monthly_wall(daily, nights_df)
     coverable = meter_wall.coverable_fraction(daily, nights_df)
     discharge = meter_wall.monthly_discharge(
-        meter_df, nights_df, elbows["charge_first"])
+        meter_df, nights_df, elbows["charge_first"],
+        round_trip=ROUND_TRIP, usable_fraction=USABLE_FRACTION)
 
     # Euros. The tariff is the first real exchange rate this project has had:
     # every earlier capacity figure traded a stock against a flow with none.
     tar = tariff.load_tariff(repo_root / tariff.TARIFF_FILE)
-    priced = economics.price_capacities(meter_df, nights_df, CAPACITIES, tar)
+    priced = economics.price_capacities(meter_df, nights_df, CAPACITIES, tar,
+                                        round_trip=ROUND_TRIP,
+                                        usable_fraction=USABLE_FRACTION)
     saved = economics.savings(priced)
     complete = saved[saved["is_full_year"]]
     annual = complete.groupby("capacity_kwh", as_index=False)["saving_eur"].mean()
@@ -297,7 +321,9 @@ def run(repo_root: Path, out_dir: Path) -> dict:
             economics.derived_threshold_kwh_per_kwh(
                 float(best["eur_per_kwh"]), HORIZON_YEARS, blended),
     }
-    arb = economics.arbitrage_ceiling_eur_yr(meter_df, tar, euro_opt)
+    arb = economics.arbitrage_ceiling_eur_yr(
+        meter_df, tar, euro_opt, round_trip=ROUND_TRIP,
+        usable_fraction=USABLE_FRACTION)
 
     ratio = monthly_ratio(nights_df, pv_nights)
     penalty = resolution_penalty_pct(samples, pv_nights, pv_sweep)
@@ -328,6 +354,8 @@ def run(repo_root: Path, out_dir: Path) -> dict:
             fixed_cost_terms=economics.FIXED_COST_TERMS,
             fixed_cost_eur=economics.FIXED_COST_EUR,
             best_eur_per_kwh=float(best["eur_per_kwh"]),
+            usable_fraction=USABLE_FRACTION,
+            round_trip=ROUND_TRIP,
             monthly_discharge=discharge,
             coverable_pct=100.0 * coverable,
         )

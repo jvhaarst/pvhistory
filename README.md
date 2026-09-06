@@ -375,11 +375,11 @@ step.
 
 | capacity | €/yr saved | marginal €/yr per added kWh |
 |---|---|---|
-| 0.5 kWh | 68 | 136.2 |
-| 5.0 kWh | 279 | 33.5 |
-| **8.5 kWh** | **353** | **13.8** |
-| 15.0 kWh | 393 | 3.2 |
-| 30.0 kWh | 412 | 0.7 |
+| 0.5 kWh | 70 | 140.1 |
+| 5.0 kWh | 288 | 33.4 |
+| **8.5 kWh** | **359** | **12.6** |
+| 15.0 kWh | 395 | 2.7 |
+| 30.0 kWh | 413 | 0.5 |
 
 Marginal value collapses by two orders of magnitude. A small battery cycles
 nearly every day; extra capacity only helps on rare large-surplus days, and
@@ -395,10 +395,10 @@ what is actually paid at 21%:
 
 | product | kWh | battery € | €/kWh | €/yr | total incl. VAT | payback incl. | payback ex-VAT |
 |---|---|---|---|---|---|---|---|
-| BSL B-LFP48-100E 3U | 5.12 | 759.95 | 148.43 | 283 | €2,059 | 7.3 yr | 6.0 yr |
-| **BSL B-LFP48-200E** | **10.24** | **1,249.95** | **122.07** | **370** | **€2,652** | **7.2 yr** | **5.9 yr** |
-| Dyness PowerBrick Plus | 16.07 | 2,100 | 130.68 | 396 | €3,681 | 9.3 yr | 7.7 yr |
-| Dyness PowerBrick Plus | 16.07 | 2,650 | 164.90 | 396 | €4,346 | 11.0 yr | 9.1 yr |
+| BSL B-LFP48-100E 3U | 5.12 | 759.95 | 148.43 | 291 | €2,059 | 7.1 yr | 5.8 yr |
+| **BSL B-LFP48-200E** | **10.24** | **1,249.95** | **122.07** | **374** | **€2,652** | **7.1 yr** | **5.9 yr** |
+| Dyness PowerBrick Plus | 16.07 | 2,100 | 130.68 | 398 | €3,681 | 9.3 yr | 7.6 yr |
+| Dyness PowerBrick Plus | 16.07 | 2,650 | 164.90 | 398 | €4,346 | 10.9 yr | 9.0 yr |
 
 Plus **€942 ex-VAT** of hardware that does not scale with capacity. Four of
 its seven terms are quoted with counts; three are assumptions, and
@@ -425,26 +425,36 @@ assumptions shift payback by roughly ±0.2 years, not the recommendation.
 
 | capacity | 10-year net position |
 |---|---|
-| 7.5 kWh | €1,525 |
-| 8.0 kWh | €1,542 |
-| **8.5 kWh** | **€1,550** |
-| 9.0 kWh | €1,548 |
-| 10.0 kWh | €1,522 |
+| 7.5 kWh | €1,591 |
+| 8.0 kWh | €1,604 |
+| **8.5 kWh** | **€1,606** |
+| 9.0 kWh | €1,599 |
+| 10.0 kWh | €1,564 |
 
-Everything from 7.5 to 10.0 kWh sits within **€29** of optimal on a €1,550
-net — under 2%. Reporting "8.5" to one decimal overstates what the curve
-can distinguish. Two assumptions move it within that band: at
-`usable_fraction` 0.95 (which the Dyness datasheet states, 15.27 of 16.07
-kWh) the optimum stays 8.5; at a fifteen-year horizon it rises to 9.5–10.0.
+Everything from 7.5 to 9.5 kWh sits within **€21** of optimal on a €1,606
+net — under 1.5%. Reporting "8.5" to one decimal overstates what the curve
+can distinguish. The horizon moves it within that band: at fifteen years the
+optimum is 9.5 kWh.
 
-So the honest reading is **8.5–10 kWh depending on horizon**, and the BSL
-B-LFP48-200E at 10.24 kWh sits at the top of that band while being the
-cheapest per kWh of the four quotes.
+(That band is the report's own figure, computed by the "How much to trust
+that number" card as every capacity within 2% of the best net position. This
+paragraph previously quoted 7.5–10.0 and €42, which I had read off the table
+by eye rather than by the rule — the ninth time in this repository that a
+hand-written number disagreed with the computed one beside it.)
 
-The model runs at `usable_fraction` 0.90 and `round_trip` 0.90, inherited
-from phase 2. Only the Dyness states a usable figure; the BSL datasheets do
-not, so 0.90 is kept as the conservative default and 0.95 published as
-sensitivity.
+So the honest reading is **8.5–9.5 kWh depending on horizon**, and the BSL
+B-LFP48-200E at 10.24 kWh sits just above that band while being the cheapest
+per kWh of the four quotes.
+
+**Depth of discharge is now sourced, not assumed.** Phase 2 used 90% with no
+citation and phases 3 and 4 inherited it; both products actually under
+consideration state **95%** — the Dyness as 15.27 usable of 16.07 kWh
+nameplate, the BSL as a DoD figure — so `USABLE_FRACTION = 0.95` is what the
+page runs. It covers only the state-of-charge window the BMS allows;
+conversion loss is `ROUND_TRIP = 0.90`, applied separately as `sqrt` on each
+side. At the old 0.90 the euro optimum was the same 8.5 kWh but the energy
+elbow read 9.0, so correcting it is what brought the two methods into
+agreement.
 
 ### Predictions, and how they fared
 
@@ -452,7 +462,8 @@ The spec recorded three predictions before measuring, so that agreement
 would be evidence rather than hindsight:
 
 1. **Wrong.** "The euro optimum will be larger than phase 3's 9.0 kWh." It is
-   8.5. The reasoning error is worth keeping: an 18–30× import/export spread
+   8.5, and at the sourced 95% depth of discharge the energy elbow is 8.5
+   too — the two agree rather than one exceeding the other. The reasoning error is worth keeping: an 18–30× import/export spread
    raises the value *per kWh cycled*, but does not change how many kWh *can*
    be cycled, and the winter wall caps that.
 2. **Held, and it is this phase's most useful result.** The euro optimum does
@@ -482,7 +493,7 @@ derivation is.
 
 Buying at SuperDal and discharging into Normaal is a 12.3 cent gross spread,
 about 10 cents after the round trip. A perfect-foresight upper bound puts it
-at **€148/yr** on top of the €353 self-consumption saving.
+at **€157/yr** on top of the €359 self-consumption saving.
 
 That bounds **grid charging only**. It is not a bound on price-aware dispatch
 in general: re-timing the battery's existing discharge from Dal hours into

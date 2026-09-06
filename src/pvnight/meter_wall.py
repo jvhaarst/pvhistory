@@ -144,7 +144,9 @@ def negative_surplus_months(monthly: pd.DataFrame) -> list[int]:
 
 def monthly_discharge(meter_df: pd.DataFrame, nights_df: pd.DataFrame,
                       capacity_kwh: float,
-                      power_kw: float = REPORT_POWER_KW) -> pd.DataFrame:
+                      power_kw: float = REPORT_POWER_KW,
+                      round_trip: float = 0.90,
+                      usable_fraction: float = 0.90) -> pd.DataFrame:
     """How much a battery of this size actually delivers, per month.
 
     The wall expressed as the battery's own behaviour rather than as a
@@ -156,7 +158,8 @@ def monthly_discharge(meter_df: pd.DataFrame, nights_df: pd.DataFrame,
     m = meter_df.sort_values("ts_utc")
     night_i, nonev_i, month_i = _masks(m, nights_df)
     sig, src = bound_signals(m)["charge_first"]
-    spec = BatterySpec(np.array([float(capacity_kwh)]), power_kw)
+    spec = BatterySpec(np.array([float(capacity_kwh)]), power_kw,
+                       round_trip, usable_fraction)
     r = simulate(sig, night_i[src], nonev_i[src], month_i[src], spec,
                  dt_hours=DT_HOURS)
     return pd.DataFrame({

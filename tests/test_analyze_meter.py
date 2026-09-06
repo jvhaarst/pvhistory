@@ -51,7 +51,14 @@ def test_resolution_penalty_is_measured_and_plausible(tmp_path, repo_root):
     """Averaging hides peaks, so the coarser run should look no worse than
     the finer one, and the gap should be single-digit percent."""
     s = run(repo_root, tmp_path)
-    assert -1.0 <= s["resolution_penalty_pct"] <= 25.0
+    # Tight on purpose. The wide -1..25 band this replaced could not fail for
+    # any reason worth knowing about, and the failure mode is specific: both
+    # sides of the comparison must carry the same battery spec, or it measures
+    # the spec rather than the resolution. Changing one side's usable fraction
+    # once moved this to -1.08%, 66x the true value.
+    assert abs(s["resolution_penalty_pct"]) < 0.5, (
+        "resolution penalty out of band — check that the 5-minute and "
+        "15-minute runs use identical BatterySpec parameters")
 
 
 def _pair(dates, pv_wh, covered_pv, meter_kwh, covered_meter):
