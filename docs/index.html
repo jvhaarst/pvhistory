@@ -1,0 +1,101 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Solar, night consumption and a battery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --muted: #52514e;
+  --axis: #898781;
+  --line: #e1e0d9;
+  --accent: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d0d0d; --surface: #1a1a19; --ink: #ffffff;
+    --muted: #c3c2b7; --axis: #898781; --line: #2c2c2a; --accent: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d0d0d; --surface: #1a1a19; --ink: #ffffff;
+  --muted: #c3c2b7; --axis: #898781; --line: #2c2c2a; --accent: #3987e5;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 400 16px/1.6 "Public Sans", ui-sans-serif, system-ui, sans-serif;
+}
+main { max-width: 900px; margin: 0 auto; padding: 40px 20px 72px; }
+
+.eyebrow {
+  font: 500 11px/1 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent);
+  margin: 0 0 10px;
+}
+h1 {
+  font: 600 32px/1.15 "Source Serif 4", Georgia, serif;
+  text-wrap: balance; margin: 0 0 10px; letter-spacing: -0.01em;
+}
+.lede {
+  color: var(--muted); margin: 0 0 8px; max-width: 62ch; font-size: 15px;
+}
+.coords {
+  font: 400 12px/1.5 "IBM Plex Mono", ui-monospace, monospace;
+  color: var(--muted); margin: 0 0 30px;
+}
+.coords b { color: var(--ink); font-weight: 500; }
+
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px; background: var(--line);
+  border: 1px solid var(--line); border-radius: 10px;
+  overflow: hidden; margin: 0 0 32px;
+}
+.stat { background: var(--surface); padding: 16px 18px; }
+.stat b {
+  display: block;
+  font: 600 22px/1.2 "Public Sans", ui-sans-serif, system-ui, sans-serif;
+  margin: 0 0 4px;
+}
+.stat span { color: var(--muted); font-size: 12px; }
+
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; padding: 20px 22px; margin: 0 0 20px;
+}
+.card h2 {
+  font: 600 16px/1.3 "Source Serif 4", Georgia, serif;
+  margin: 0 0 6px; color: var(--ink);
+}
+.card p { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 68ch; }
+.card p em { color: var(--ink); font-style: normal; font-weight: 500; }
+.chart { overflow-x: auto; }
+.chart svg { display: block; min-width: 640px; }
+
+footer {
+  color: var(--muted); font-size: 12px; margin-top: 8px;
+  border-top: 1px solid var(--line); padding-top: 16px;
+}
+</style>
+<style>
+.cards { display: grid; gap: 18px; margin: 28px 0 0; }
+a.card {
+  display: block; text-decoration: none; color: inherit;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); padding: 20px 22px;
+  transition: border-color .15s ease, transform .15s ease;
+}
+a.card:hover { border-color: var(--accent); transform: translateY(-1px); }
+a.card h2 { margin: 6px 0 8px; font-size: 20px; }
+a.card p { margin: 0; color: var(--muted); font-size: 15px; }
+.tag {
+  display: inline-block; font: 500 10px/1 "IBM Plex Mono", ui-monospace,
+  monospace; letter-spacing: .08em; text-transform: uppercase;
+  padding: 4px 7px; border-radius: 4px; margin-left: 8px;
+  border: 1px solid var(--line); color: var(--muted); vertical-align: 2px;
+}
+.tag.superseded { color: #d95926; border-color: #d9592655; }
+footer { margin-top: 44px; color: var(--muted); font-size: 14px; }
+</style></head><body><main><p class="eyebrow">A home PV installation, measured</p><h1>Solar, night consumption, and whether a battery pays</h1><p class="lede">Four reports, built from six years of five-minute solar history and fifteen-minute smart-meter data. They were written in order, and each one changed the answer the previous had reached — including one that found a hardware fault which invalidated an entire phase. Every figure on these pages is computed from the data beside it.</p><div class="cards"><a class="card" href="report.html"><p class="eyebrow">Phase 1</p><h2>The solar window</h2><p>When solar generation is actually possible, derived from six years of five-minute history rather than from an almanac. Panels wake about three minutes before geometric sunrise, so the boundary is fitted to when they really start and stop, and the fit is what makes every later page's definition of &ldquo;night&rdquo; empirical.</p></a><a class="card" href="night_report.html"><p class="eyebrow">Phase 2<span class="tag superseded">superseded</span></p><h2>Night consumption and battery sizing</h2><p>The first attempt at sizing a battery, from PVOutput's own consumption channel. Kept because the method is sound and the comparison is instructive — but that channel was later found to have lost about a quarter of the household load from December 2022, so its figures understate the night and the battery. Read the meter page instead.</p></a><a class="card" href="meter_report.html"><p class="eyebrow">Phase 3 &amp; 4</p><h2>Night consumption, measured at the meter</h2><p>The same question rebuilt on smart-meter data, which measures what actually crosses the grid connection, then priced against a real 2027 tariff. Contains the fault that invalidated phase 2, the winter wall that bounds any battery answer, and the capacity the euros actually justify.</p></a><a class="card" href="battery_investment.html"><p class="eyebrow">Phase 4b</p><h2>Is the battery worth buying?</h2><p>A different question from all of the above: not what size, but whether to buy at all, for hardware already chosen, against leaving the money invested elsewhere. The manufacturer states two lifetimes and they disagree about the answer, which is the honest headline.</p></a></div><footer>Generated 2026-09-06 from <a href="https://github.com/jvhaarst/pvhistory">github.com/jvhaarst/pvhistory</a>. The underlying measurements are not published; the derived tables in <code>out/</code> are.</footer></main></body></html>

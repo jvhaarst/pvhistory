@@ -520,6 +520,23 @@ household's pattern *would* cost under the new contract, not what it did cost.
 `out/meter_tariff_bands.csv` the parsed prices, and `out/meter_quotes.csv`
 each quote against the measured curve, with both VAT treatments.
 
+## The published site
+
+`build_site.py` copies the four reports out of `out/` into `docs/` and writes
+an index that describes each and flags which are superseded. GitHub Pages
+serves `docs/` from `main`:
+
+```
+uv run python analyze.py && uv run python analyze_night.py
+uv run python analyze_meter.py && uv run python analyze_investment.py
+uv run python build_site.py
+```
+
+It copies rather than regenerates, and fails loudly if a report is missing,
+so the site can never quietly disagree with `out/`. Nothing republishes
+without running it — the analysis needs the private inputs in `data/`, which
+are not in the repository, so this cannot be automated in CI.
+
 ## Is the battery worth buying?
 
 `analyze_investment.py` answers a different question from every section

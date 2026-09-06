@@ -9,6 +9,8 @@ out/report.html
 out/night_report.html
 out/meter_report.html
 out/battery_investment.html
+# docs/*.html is the published site and IS tracked; only the
+# out/ originals are ignored.
 
 # Personal measurements: PVOutput exports, smart-meter exports, tariff and
 # quotes. Untracked by decision (2026-09-06) and purged from history.
