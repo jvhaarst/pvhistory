@@ -70,7 +70,10 @@ INSTALL_YEAR_OFFSET = 1
 
 # The purchase, derived from phase 4's quote table and parts list rather than
 # retyped, so the two pages cannot drift apart on what the hardware costs.
-BATTERY = "BSL B-LFP48-200E"
+# The wall-mounted model, chosen 2026-09-06. Its datasheet is the
+# source for WARRANTY_YEARS, DESIGN_LIFE_YEARS and CYCLE_LIFE above,
+# so the lifetime figures and the price now describe one product.
+BATTERY = "BSL B-LFP48-200PW"
 _QUOTE = economics.QUOTES.set_index("product").loc[BATTERY]
 CAPACITY_KWH = float(_QUOTE["kwh"])
 BATTERY_EUR = float(_QUOTE["eur"])
